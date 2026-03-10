@@ -1565,6 +1565,7 @@ components:
             - PRODUCT_BLOCKED
             - PRODUCT_DELISTED
             - SKU_DISABLED
+            - null 
           example: null
 
     CartSummary:
