@@ -23,6 +23,8 @@ tags:
     description: Баннеры на главной странице и аналитика (показы, клики)
   - name: Cart
     description: Управление корзиной покупателя
+  - name: Рекомендации
+    description: Получение похожих товаров и подборок
     
 security:
 - BearerAuth: []
