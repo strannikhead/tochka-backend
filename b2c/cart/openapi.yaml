@@ -6,11 +6,17 @@ info:
     Проектируется синдикатом Interface.
     Домены: корзина (CRUD), избранное, главная страница (баннеры, подборки).
 
+  contact:
+    name: Interface Team
+    email: interface@neomarket.ru
+
 tags:
   - name: Избранное
     description: Операции с избранными товарами
   - name: Корзина
     description: Операции с корзиной
+  - name: Подборки
+    description: Операции с подборками товаров
   - name: Подписка
     description: Подписки на уведомления о товарах
   - name: Главная — Баннеры
