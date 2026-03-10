@@ -1017,7 +1017,7 @@ paths:
       tags:
         - Корзина
       security:
-        - bearerAuth: []
+        - BearerAuth: []
       parameters:
         - name: cart_item_ids
           in: query
@@ -1498,25 +1498,25 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ValidationErrorResponse'
+                $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: Исходный товар не найден
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ValidationErrorResponse'
+                $ref: '#/components/schemas/ErrorResponse'
         '503':
           description: Product Service (B2B) временно недоступен
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ValidationErrorResponse'
+                $ref: '#/components/schemas/ErrorResponse'
         '504':
           description: Таймаут ответа B2B
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ValidationErrorResponse'
+                $ref: '#/components/schemas/ErrorResponse'
 components:
 
   securitySchemes:
