@@ -21,8 +21,7 @@ tags:
     description: Подписки на уведомления о товарах
   - name: Главная — Баннеры
     description: Баннеры на главной странице и аналитика (показы, клики)
-  - name: Cart
-    description: Управление корзиной покупателя
+
   - name: Рекомендации
     description: Получение похожих товаров и подборок
     
@@ -435,85 +434,98 @@ paths:
                 code: "SERVICE_UNAVAILABLE"
                 message: "Сервис временно недоступен, попробуйте позже"
 
-  # ========== КОРЗИНА ==========
+# ========== КОРЗИНА ==========
   /api/v1/cart:
     get:
+      operationId: getCart
       tags:
         - Корзина
       summary: Просмотр корзины с актуальными ценами
       description: |
-        Возвращает содержимое корзины текущего пользователя с актуальными данными
-        из B2B (цены, остатки, названия, фото).
+        Возвращает содержимое корзины пользователя или гостевой сессии.
 
-        B2C хранит только `(user_id, sku_id, quantity)`. Всё остальное подгружается
-        из B2B батч-запросом по списку SKU.
+        B2C хранит только `user_id/session_id`, `sku_id`, `quantity`.
+        Данные о товарах, ценах, остатках и доступности обогащаются из B2B.
 
-        Недоступные товары не удаляются из корзины - они возвращаются
-        с флагом `available: false` и причиной в `unavailable_reason`.
+        Хотя бы один из заголовков `X-User-Id` или `X-Session-Id` должен быть передан.
 
-        Если B2B не отвечает или таймаутит - возвращается `500 UPSTREAM_ERROR`.
+        Недоступные товары не удаляются из корзины автоматически.
+        Они возвращаются с `available: false` и заполненным `unavailable_reason`.
 
+        Пустая корзина возвращается как `items: []` и нулевой `summary`.
       parameters:
-        - name: X-User-Id
-          in: header
-          required: true
-          description: Идентификатор покупателя
-          schema:
-            type: string
-            format: uuid
-            example: "123e4567-e89b-12d3-a456-426614174000"
-
+        - $ref: "#/components/parameters/XUserId"
+        - $ref: "#/components/parameters/XSessionId"
       responses:
         "200":
-          description: |
-            Содержимое корзины (может быть пустым - тогда `items: []` и нулевой `summary`).
+          description: Содержимое корзины
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/CartResponse"
               examples:
                 with_items:
-                  summary: Корзина с доступными и недоступным товаром
+                  summary: Корзина с доступными и недоступными товарами
                   value:
                     items:
-                      - sku_id: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
-                        quantity: 1
+                      - item_id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+                        sku_id: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
                         product_id: "550e8400-e29b-41d4-a716-446655440000"
                         product_title: "iPhone 15 Pro Max"
                         sku_name: "256GB Black"
-                        image: "/s3/iphone15-1.jpg"
-                        price: 12999000
-                        active_quantity: 5
-                        item_total: 12999000
+                        image_url: "/s3/iphone15-1.jpg"
+                        unit_price: 12999000
+                        quantity: 1
+                        available_stock: 5
+                        line_total: 12999000
                         available: true
                         unavailable_reason: null
-                      - sku_id: "8a4e3f9c-1a2b-4c8d-9e5f-6b7a8c9d0e1f"
-                        quantity: 2
+                      - item_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                        sku_id: "8a4e3f9c-1a2b-4c8d-9e5f-6b7a8c9d0e1f"
                         product_id: "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
                         product_title: "Чехол силиконовый"
                         sku_name: "Прозрачный"
-                        image: "/s3/case-1.jpg"
-                        price: 299000
-                        active_quantity: 2
-                        item_total: 598000
+                        image_url: "/s3/case-1.jpg"
+                        unit_price: 299000
+                        quantity: 2
+                        available_stock: 2
+                        line_total: 598000
                         available: true
                         unavailable_reason: null
-                      - sku_id: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
-                        quantity: 1
+                      - item_id: "b2c3d4e5-f6a7-8901-bcde-f12345678901"
+                        sku_id: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
                         product_id: "1e2a3b4c-5d6e-7f8a-9b0c-1d2e3f4a5b6c"
                         product_title: "Кроссовки Nike Air Max"
                         sku_name: "42 размер"
-                        image: "/s3/nike-1.jpg"
-                        price: 899000
-                        active_quantity: 0
-                        item_total: 0
+                        image_url: "/s3/nike-1.jpg"
+                        unit_price: 899000
+                        quantity: 1
+                        available_stock: 0
+                        line_total: 0
                         available: false
                         unavailable_reason: "OUT_OF_STOCK"
                     summary:
                       total_amount: 13597000
                       total_items: 3
+                      total_quantity: 4
                       available_items: 2
-
+                      has_unavailable_items: true
+                      checkout_ready: false
+                      currency: "RUB"
+                    checkout_payload:
+                      items:
+                        - product_id: "550e8400-e29b-41d4-a716-446655440000"
+                          sku_id: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+                          quantity: 1
+                          unit_price: 12999000
+                          line_total: 12999000
+                        - product_id: "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+                          sku_id: "8a4e3f9c-1a2b-4c8d-9e5f-6b7a8c9d0e1f"
+                          quantity: 2
+                          unit_price: 299000
+                          line_total: 598000
+                      total_amount: 13597000
+                      currency: "RUB"
                 empty_cart:
                   summary: Пустая корзина
                   value:
@@ -521,476 +533,290 @@ paths:
                     summary:
                       total_amount: 0
                       total_items: 0
+                      total_quantity: 0
                       available_items: 0
-
+                      has_unavailable_items: false
+                      checkout_ready: false
+                      currency: "RUB"
+                    checkout_payload:
+                      items: []
+                      total_amount: 0
+                      currency: "RUB"
+        "400":
+          $ref: "#/components/responses/MissingCartIdentity"
         "401":
-          description: Нет заголовка `X-User-Id` или он невалидный
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-              example:
-                code: "UNAUTHORIZED"
-                message: "Missing or invalid X-User-Id"
-
+          $ref: "#/components/responses/Unauthorized"
         "500":
-          description: B2B не ответил (timeout, 5xx) или внутренняя ошибка B2C
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-              examples:
-                upstream_error:
-                  summary: B2B недоступен
-                  value:
-                    code: "UPSTREAM_ERROR"
-                    message: "Failed to fetch product data from B2B"
-                internal_error:
-                  summary: Внутренняя ошибка B2C
-                  value:
-                    code: "INTERNAL_ERROR"
-                    message: "Unexpected server error"
-
-    post:
-      tags:
-        - Корзина
-      summary: "Добавить товар в корзину"
-      description: "Добавляет указанный товар в корзину."
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                product_id:
-                  type: string
-                  format: uuid
-                  description: "Идентификатор товара"
-                  example: "550e8400-e29b-41d4-a716-446655440000"
-                sku_id:
-                  type: string
-                  format: uuid
-                  description: "Идентификатор SKU"
-                  example: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
-                quantity:
-                  type: integer
-                  default: 1
-                  minimum: 1
-                  example: 2
-      responses:
-        "200":
-          description: "Товар успешно добавлен"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/CartItemLegacy"
-        "400":
-          description: "Некорректные данные"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "401":
-          description: "Не авторизован"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "409":
-          description: "Товар уже в корзине или недоступен"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              examples:
-                alreadyInCart:
-                  value:
-                    code: ALREADY_IN_CART
-                    message: "Товар уже добавлен в корзину."
-                blocked:
-                  value:
-                    code: PRODUCT_BLOCKED
-                    message: "Этот товар заблокирован и не доступен для покупки."
-
-    delete:
-      tags:
-        - Корзина
-      summary: "Удалить все товары из корзины"
-      description: "Полностью очищает корзину, удаляя все товары."
-      responses:
-        "204":
-          description: "Корзина успешно очищена"
-        "401":
-          description: "Не авторизован"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-
-  /api/v1/cart/{item_id}:
-    get:
-      tags:
-        - Корзина
-      summary: "Получить товар из корзины по ID"
-      description: "Возвращает товар по его ID, с учетом статуса доступности."
-      parameters:
-        - name: item_id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-          description: "ID товара в корзине"
-          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
-      responses:
-        "200":
-          description: "Успешное получение товара"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/CartItemLegacy"
-        "404":
-          description: "Товар не найден или удален"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "401":
-          description: "Не авторизован"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
+          $ref: "#/components/responses/InternalServerError"
         "503":
-          description: "Сервис B2B недоступен"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                code: B2B_UNAVAILABLE
-                message: "B2B сервис временно недоступен. Повторите попытку позже."
-
-    put:
-      tags:
-        - Корзина
-      summary: "Обновить количество товара в корзине"
-      description: "Обновляет количество выбранного товара."
-      parameters:
-        - name: item_id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-          description: "ID товара в корзине"
-          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                quantity:
-                  type: integer
-                  minimum: 1
-                  example: 3
-      responses:
-        "200":
-          description: "Обновлено успешно"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/CartItemLegacy"
-        "400":
-          description: "Некорректные данные"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "404":
-          description: "Товар не найден"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "401":
-          description: "Не авторизован"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "409":
-          description: "Недоступен или конфликт"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              examples:
-                out_of_stock:
-                  value:
-                    code: OUT_OF_STOCK
-                    message: "Товара больше нет в наличии."
-                blocked:
-                  value:
-                    code: PRODUCT_BLOCKED
-                    message: "Этот товар заблокирован и недоступен."
+          $ref: "#/components/responses/ServiceUnavailable"
 
     delete:
+      operationId: clearCart
       tags:
         - Корзина
-      summary: "Удалить товар из корзины"
-      description: "Удаляет товар по его ID."
+      summary: Очистить корзину
+      description: |
+        Удаляет все позиции из корзины пользователя или гостевой сессии.
+
+        Хотя бы один из заголовков `X-User-Id` или `X-Session-Id` должен быть передан.
       parameters:
-        - name: item_id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-          description: "ID товара в корзине"
-          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        - $ref: "#/components/parameters/XUserId"
+        - $ref: "#/components/parameters/XSessionId"
       responses:
         "204":
-          description: "Товар успешно удален"
-        "404":
-          description: "Товар не найден"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
+          description: Корзина очищена
+        "400":
+          $ref: "#/components/responses/MissingCartIdentity"
         "401":
-          description: "Не авторизован"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
 
-  # --- ИЗМЕНЕНИЕ КОЛ-ВА ТОВАРОВ ---
   /api/v1/cart/items:
     post:
-      summary: Добавить товар в корзину
-      description: >
-        Добавляет SKU в корзину текущего пользователя.
-        Перед сохранением проверяет: дубликат в корзине,
-        существование и доступность SKU в Product Service,
-        достаточность остатков.
-        Корзина НЕ резервирует товар — резервирование происходит
-        только при оформлении заказа.
       operationId: addCartItem
       tags:
-        - Cart
+        - Корзина
+      summary: Добавить товар в корзину
+      description: |
+        Добавляет SKU в корзину пользователя или гостевой сессии.
+
+        Если такой SKU уже есть в корзине, количество существующей позиции увеличивается.
+        Перед сохранением сервис проверяет существование SKU, его доступность
+        и достаточность остатков в B2B.
+
+        Хотя бы один из заголовков `X-User-Id` или `X-Session-Id` должен быть передан.
+      parameters:
+        - $ref: "#/components/parameters/XUserId"
+        - $ref: "#/components/parameters/XSessionId"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AddCartItemRequest'
+              $ref: "#/components/schemas/AddCartItemRequest"
             example:
-              skuId: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+              sku_id: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
               quantity: 1
       responses:
-        '201':
-          description: Товар успешно добавлен в корзину
+        "201":
+          description: Товар добавлен как новая позиция
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CartItemResponse'
-              example:
-                id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
-                sku:
-                  id: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
-                  name: "256GB Black"
-                  priceAtAddition: 12999000
-                  image: "/s3/iphone15-black.jpg"
-                product:
-                  id: "550e8400-e29b-41d4-a716-446655440000"
-                  title: "iPhone 15 Pro Max"
-                quantity: 1
-                itemTotalPrice: 12999000
-                cartTotalPrice: 12999000
-        '400':
-          description: Невалидный запрос — quantity меньше 1
+                $ref: "#/components/schemas/CartMutationResponse"
+        "200":
+          description: SKU уже был в корзине, количество увеличено
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                code: "INVALID_QUANTITY"
-                message: "Количество должно быть не менее 1"
-        '401':
-          description: Токен отсутствует или невалиден
+                $ref: "#/components/schemas/CartMutationResponse"
+        "400":
+          description: Невалидный запрос
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                code: "UNAUTHORIZED"
-                message: "Токен отсутствует или невалиден"
-        '404':
-          description: SKU не найден в Product Service
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                invalid_quantity:
+                  value:
+                    code: "INVALID_QUANTITY"
+                    message: "Количество должно быть не менее 1"
+                missing_identity:
+                  value:
+                    code: "MISSING_CART_IDENTITY"
+                    message: "Передайте X-User-Id или X-Session-Id"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: SKU не найден в B2B
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 code: "SKU_NOT_FOUND"
                 message: "SKU с указанным id не существует"
-        '409':
-          description: Товар уже есть в корзине
+        "410":
+          description: Товар заблокирован или снят с продажи
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                code: "SKU_ALREADY_IN_CART"
-                message: "Этот товар уже добавлен в корзину"
-        '410':
-          description: >
-            Товар заблокирован, снят с продажи или не имеет
-            статус MODERATED
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 code: "SKU_NOT_AVAILABLE"
                 message: "Товар недоступен для покупки"
-        '422':
-          description: Запрошенное количество превышает остаток на складе
+        "422":
+          description: Недостаточно остатков на складе
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 code: "INSUFFICIENT_STOCK"
                 message: "Нельзя добавить 3, доступно только 2"
-        '503':
-          description: Product Service временно недоступен
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/cart/items/{item_id}:
+    parameters:
+      - $ref: "#/components/parameters/ItemId"
+
+    get:
+      operationId: getCartItem
+      tags:
+        - Корзина
+      summary: Получить позицию корзины по ID
+      description: |
+        Возвращает одну позицию корзины, обогащённую актуальными данными из B2B.
+      parameters:
+        - $ref: "#/components/parameters/XUserId"
+        - $ref: "#/components/parameters/XSessionId"
+      responses:
+        "200":
+          description: Позиция найдена
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/CartItem"
+        "400":
+          $ref: "#/components/responses/MissingCartIdentity"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Позиция не найдена
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
               example:
-                code: "SERVICE_UNAVAILABLE"
-                message: "Сервис временно недоступен, попробуйте позже"
+                code: "CART_ITEM_NOT_FOUND"
+                message: "Позиция не найдена в корзине"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
-  /api/v1/cart/items/{itemId}:
     put:
-      summary: Изменить количество товара в корзине
-      description: >
-        Обновляет количество существующей позиции в корзине.
-        Перед обновлением проверяет принадлежность позиции
-        текущему пользователю, доступность SKU и достаточность остатков.
-        Quantity должен быть >= 1. Для удаления позиции
-        использовать DELETE /cart/items/{itemId}.
       operationId: updateCartItem
       tags:
-        - Cart
+        - Корзина
+      summary: Изменить количество товара
+      description: |
+        Обновляет количество существующей позиции корзины.
+
+        Проверяет принадлежность позиции текущему пользователю или сессии,
+        доступность SKU и достаточность остатков.
+        Для удаления позиции используется `DELETE`.
+
+        Хотя бы один из заголовков `X-User-Id` или `X-Session-Id` должен быть передан.
       parameters:
-        - name: itemId
-          in: path
-          required: true
-          description: ID позиции в корзине
-          schema:
-            type: string
-            format: uuid
-            example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        - $ref: "#/components/parameters/XUserId"
+        - $ref: "#/components/parameters/XSessionId"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UpdateCartItemRequest'
+              $ref: "#/components/schemas/UpdateCartItemRequest"
             example:
               quantity: 2
       responses:
-        '200':
-          description: Количество успешно обновлено
+        "200":
+          description: Количество обновлено
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CartItemResponse'
-              example:
-                id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
-                sku:
-                  id: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
-                  name: "256GB Black"
-                  priceAtAddition: 12999000
-                  image: "/s3/iphone15-black.jpg"
-                product:
-                  id: "550e8400-e29b-41d4-a716-446655440000"
-                  title: "iPhone 15 Pro Max"
-                quantity: 2
-                itemTotalPrice: 25998000
-                cartTotalPrice: 25998000
-        '400':
-          description: Невалидный запрос — quantity меньше 1
+                $ref: "#/components/schemas/CartMutationResponse"
+        "400":
+          description: Невалидный запрос
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                code: "INVALID_QUANTITY"
-                message: "Количество должно быть не менее 1"
-        '401':
-          description: Токен отсутствует или невалиден
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                invalid_quantity:
+                  value:
+                    code: "INVALID_QUANTITY"
+                    message: "Количество должно быть не менее 1"
+                missing_identity:
+                  value:
+                    code: "MISSING_CART_IDENTITY"
+                    message: "Передайте X-User-Id или X-Session-Id"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Попытка изменить чужую позицию
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                code: "UNAUTHORIZED"
-                message: "Токен отсутствует или невалиден"
-        '403':
-          description: Попытка изменить позицию другого пользователя
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 code: "ACCESS_DENIED"
                 message: "Нет доступа к этой позиции корзины"
-        '404':
-          description: Позиция с указанным itemId не найдена в корзине
+        "404":
+          description: Позиция не найдена
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 code: "CART_ITEM_NOT_FOUND"
                 message: "Позиция не найдена в корзине"
-        '410':
-          description: >
-            Товар заблокирован или снят с продажи.
-            Позиция автоматически помечается как недоступная.
+        "410":
+          description: Товар заблокирован или снят с продажи
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 code: "PRODUCT_NOT_AVAILABLE"
                 message: "Товар недоступен и не может быть обновлён"
-        '422':
-          description: Запрошенное количество превышает остаток на складе
+        "422":
+          description: Недостаточно остатков
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 code: "INSUFFICIENT_STOCK"
                 message: "Нельзя установить 10, доступно только 5"
-        '503':
-          description: Product Service временно недоступен
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+    delete:
+      operationId: deleteCartItem
+      tags:
+        - Корзина
+      summary: Удалить позицию из корзины
+      description: |
+        Удаляет одну позицию из корзины пользователя или гостевой сессии.
+      parameters:
+        - $ref: "#/components/parameters/XUserId"
+        - $ref: "#/components/parameters/XSessionId"
+      responses:
+        "204":
+          description: Позиция удалена
+        "400":
+          $ref: "#/components/responses/MissingCartIdentity"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Позиция не найдена
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               example:
-                code: "SERVICE_UNAVAILABLE"
-                message: "Сервис временно недоступен, попробуйте позже"
+                code: "CART_ITEM_NOT_FOUND"
+                message: "Позиция не найдена в корзине"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
 
   /cart/validate:
     get:
@@ -1518,6 +1344,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 components:
+    
 
   securitySchemes:
     BearerAuth:
@@ -1529,6 +1356,76 @@ components:
         API Gateway проверяет подпись токена, извлекает userId
         и передаёт его в Cart Service через внутренний заголовок X-User-Id.
         Клиент не передаёт X-User-Id напрямую.
+  parameters:
+    XUserId:
+      name: X-User-Id
+      in: header
+      required: false
+      description: UUID покупателя. Передаётся после аутентификации.
+      schema:
+        type: string
+        format: uuid
+        example: "123e4567-e89b-12d3-a456-426614174000"
+
+    XSessionId:
+      name: X-Session-Id
+      in: header
+      required: false
+      description: Идентификатор гостевой сессии. Используется для неавторизованной корзины.
+      schema:
+        type: string
+        example: "sess-7f3d82ab-14bc-4d11-a902-31d29d9189af"
+
+    ItemId:
+      name: item_id
+      in: path
+      required: true
+      description: ID позиции в корзине
+      schema:
+        type: string
+        format: uuid
+        example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+
+  responses:
+    MissingCartIdentity:
+      description: Не передан ни X-User-Id, ни X-Session-Id
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: "MISSING_CART_IDENTITY"
+            message: "Передайте X-User-Id или X-Session-Id"
+
+    Unauthorized:
+      description: Пользователь не авторизован или X-User-Id невалиден
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: "UNAUTHORIZED"
+            message: "Missing or invalid X-User-Id"
+
+    ServiceUnavailable:
+      description: B2B / Product Service временно недоступен
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: "SERVICE_UNAVAILABLE"
+            message: "Сервис временно недоступен, попробуйте позже"
+
+    InternalServerError:
+      description: Внутренняя ошибка сервиса корзины
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: "INTERNAL_ERROR"
+            message: "Unexpected server error"
 
   schemas:
     # ----- СХЕМЫ ДЛЯ ИЗБРАННОГО -----
@@ -1749,172 +1646,23 @@ components:
           description: Дата создания подписки
           example: "2026-03-09T12:00:00Z"
 
-    # ----- СХЕМЫ ДЛЯ КОРЗИНЫ (обогащённая версия для GET /cart) -----
-    CartItem:
-      type: object
-      description: Позиция в корзине, обогащённая данными из B2B
-      properties:
-        sku_id:
-          type: string
-          format: uuid
-          description: ID варианта (SKU) - хранится в B2C
-          example: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
-        quantity:
-          type: integer
-          description: Количество штук, добавленных покупателем - хранится в B2C
-          minimum: 1
-          example: 1
-        product_id:
-          type: string
-          format: uuid
-          description: ID товара-родителя - из B2B
-          example: "550e8400-e29b-41d4-a716-446655440000"
-        product_title:
-          type: string
-          description: Название товара - из B2B
-          example: "iPhone 15 Pro Max"
-        sku_name:
-          type: string
-          description: Название варианта - из B2B
-          example: "256GB Black"
-        image:
-          type: string
-          description: URL главного фото - из B2B
-          example: "/s3/iphone15-1.jpg"
-        price:
-          type: integer
-          description: Цена в копейках - из B2B
-          example: 12999000
-        active_quantity:
-          type: integer
-          description: Остаток на складе - из B2B
-          example: 5
-        item_total:
-          type: integer
-          description: "price × quantity в копейках (0, если товар недоступен) - рассчитывается B2C"
-          example: 12999000
-        available:
-          type: boolean
-          description: Можно ли оформить эту позицию - рассчитывается B2C
-          example: true
-        unavailable_reason:
-          type: string
-          nullable: true
-          description: |
-            Причина недоступности. `null`, если товар доступен.
-            Возможные значения: OUT_OF_STOCK, BLOCKED, DELETED.
-          enum:
-            - OUT_OF_STOCK
-            - BLOCKED
-            - DELETED
-            - null
-          example: null
-      required:
-        - sku_id
-        - quantity
-        - product_id
-        - product_title
-        - sku_name
-        - image
-        - price
-        - active_quantity
-        - item_total
-        - available
-        - unavailable_reason
+    # ----- СХЕМЫ ДЛЯ КОРЗИНЫ -----
 
-    CartSummary:
-      type: object
-      description: Итоги по корзине
-      properties:
-        total_amount:
-          type: integer
-          description: Сумма только по доступным позициям, в копейках
-          example: 13597000
-        total_items:
-          type: integer
-          description: Общее количество позиций в корзине
-          example: 3
-        available_items:
-          type: integer
-          description: Сколько позиций можно оформить
-          example: 2
-      required:
-        - total_amount
-        - total_items
-        - available_items
-
-    CartResponse:
-      type: object
-      properties:
-        items:
-          type: array
-          description: Список позиций корзины (обогащённых данными из B2B)
-          items:
-            $ref: "#/components/schemas/CartItem"
-        summary:
-          $ref: "#/components/schemas/CartSummary"
-      required:
-        - items
-        - summary
-
-    # Старая схема CartItem для POST/PUT/GET по item_id (сохранена для обратной совместимости)
-    CartItemLegacy:
-      type: object
-      description: Позиция корзины (используется в POST, PUT, GET по item_id)
-      properties:
-        id:
-          type: string
-          format: uuid
-          description: "Идентификатор товара в корзине"
-          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
-        product_id:
-          type: string
-          format: uuid
-          description: "Идентификатор товара"
-          example: "550e8400-e29b-41d4-a716-446655440000"
-        sku_id:
-          type: string
-          format: uuid
-          description: "Идентификатор SKU"
-          example: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
-        name:
-          type: string
-          description: "Название товара"
-          example: "iPhone 15 Pro Max 256GB Black"
-        quantity:
-          type: integer
-          description: "Количество"
-          example: 2
-        price:
-          type: integer
-          description: "Цена в копейках"
-          example: 12999000
-        is_available:
-          type: boolean
-          description: "Доступен ли товар"
-          example: true
-        availability_status:
-          type: string
-          description: "Статус доступности товара"
-          enum: [ACTIVE, DELETED, BLOCKED]
-          example: "ACTIVE"
-    # --- ИЗМЕНЕНИЕ КОЛ-ВА ТОВАРОВ ---
-    
     AddCartItemRequest:
       type: object
       required:
-        - skuId
+        - sku_id
         - quantity
       properties:
-        skuId:
+        sku_id:
           type: string
           format: uuid
-          description: ID варианта товара (SKU) из Product Service
+          description: Идентификатор SKU
           example: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
         quantity:
           type: integer
           minimum: 1
-          description: Количество единиц товара. Минимум 1.
+          description: Количество единиц товара
           example: 1
 
     UpdateCartItemRequest:
@@ -1925,96 +1673,208 @@ components:
         quantity:
           type: integer
           minimum: 1
-          description: >
-            Новое количество единиц товара. Минимум 1.
-            Для удаления позиции использовать DELETE /cart/items/{itemId}.
+          description: Новое количество товара
           example: 2
-    CartItemResponse:
+
+    CartItem:
       type: object
-      description: Позиция корзины с актуальными данными SKU и товара
+      description: Позиция корзины, обогащённая данными из B2B
       required:
-        - id
-        - sku
-        - product
+        - item_id
+        - sku_id
+        - product_id
+        - product_title
+        - sku_name
+        - unit_price
         - quantity
-        - itemTotalPrice
-        - cartTotalPrice
+        - available_stock
+        - line_total
+        - available
       properties:
-        id:
+        item_id:
           type: string
           format: uuid
           description: ID позиции в корзине
           example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
-        sku:
-          $ref: '#/components/schemas/SkuSnapshot'
-        product:
-          $ref: '#/components/schemas/ProductSnapshot'
-        quantity:
-          type: integer
-          description: Текущее количество единиц в корзине
-          example: 2
-        itemTotalPrice:
-          type: integer
-          description: >
-            Стоимость позиции: priceAtAddition × quantity.
-            В минимальных единицах валюты (копейки).
-            Пример: 25998000 = 259 980,00 руб.
-          example: 25998000
-        cartTotalPrice:
-          type: integer
-          description: >
-            Итоговая сумма всей корзины после изменения.
-            В минимальных единицах валюты (копейки).
-          example: 25998000
-
-    SkuSnapshot:
-      type: object
-      description: >
-        Снимок данных SKU на момент добавления в корзину.
-        Цена фиксируется при добавлении и не меняется
-        при последующем изменении цены продавцом.
-      required:
-        - id
-        - name
-        - priceAtAddition
-        - image
-      properties:
-        id:
+        sku_id:
           type: string
           format: uuid
           description: ID варианта товара (SKU)
           example: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
-        name:
-          type: string
-          description: Название варианта
-          example: "256GB Black"
-        priceAtAddition:
-          type: integer
-          description: >
-            Цена SKU на момент добавления в корзину.
-            В минимальных единицах валюты (копейки).
-            Пример: 12999000 = 129 990,00 руб.
-          example: 12999000
-        image:
-          type: string
-          description: URL главного фото SKU
-          example: "/s3/iphone15-black.jpg"
-    ProductSnapshot:
-      type: object
-      description: Краткая информация о товаре, к которому относится SKU
-      required:
-        - id
-        - title
-      properties:
-        id:
+        product_id:
           type: string
           format: uuid
-          description: ID товара в Product Service
+          description: ID товара
           example: "550e8400-e29b-41d4-a716-446655440000"
-        title:
+        product_title:
           type: string
           description: Название товара
           example: "iPhone 15 Pro Max"
+        sku_name:
+          type: string
+          description: Название варианта
+          example: "256GB Black"
+        image_url:
+          type: string
+          nullable: true
+          description: URL изображения SKU
+          example: "/s3/iphone15-1.jpg"
+        unit_price:
+          type: integer
+          description: Актуальная цена за единицу в копейках
+          example: 12999000
+        quantity:
+          type: integer
+          minimum: 1
+          description: Количество в корзине
+          example: 1
+        available_stock:
+          type: integer
+          minimum: 0
+          description: Текущий остаток на складе
+          example: 5
+        line_total:
+          type: integer
+          description: Сумма по позиции = unit_price × quantity. Для недоступного товара может быть 0
+          example: 12999000
+        available:
+          type: boolean
+          description: Доступен ли товар для покупки
+          example: true
+        unavailable_reason:
+          type: string
+          nullable: true
+          description: |
+            Причина недоступности. `null`, если товар доступен.
+            Возможные значения: OUT_OF_STOCK, PRODUCT_BLOCKED,
+            PRODUCT_DELISTED, SKU_DISABLED.
+          enum:
+            - OUT_OF_STOCK
+            - PRODUCT_BLOCKED
+            - PRODUCT_DELISTED
+            - SKU_DISABLED
+            - null 
+          example: null
+
+    CartSummary:
+      type: object
+      description: Итоги по корзине
+      required:
+        - total_amount
+        - total_items
+        - total_quantity
+        - available_items
+        - has_unavailable_items
+        - checkout_ready
+        - currency
+      properties:
+        total_amount:
+          type: integer
+          description: Сумма по доступным товарам в копейках
+          example: 13597000
+        total_items:
+          type: integer
+          description: Количество уникальных позиций в корзине
+          example: 3
+        total_quantity:
+          type: integer
+          description: Суммарное количество единиц товара в корзине
+          example: 4
+        available_items:
+          type: integer
+          description: Количество доступных позиций
+          example: 2
+        has_unavailable_items:
+          type: boolean
+          description: Есть ли в корзине недоступные позиции
+          example: true
+        checkout_ready:
+          type: boolean
+          description: Можно ли переходить к оформлению заказа
+          example: false
+        currency:
+          type: string
+          description: Валюта корзины
+          example: "RUB"
+
+    CheckoutItem:
+      type: object
+      required:
+        - product_id
+        - sku_id
+        - quantity
+        - unit_price
+        - line_total
+      properties:
+        product_id:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        sku_id:
+          type: string
+          format: uuid
+          example: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+        quantity:
+          type: integer
+          example: 2
+        unit_price:
+          type: integer
+          example: 12999000
+        line_total:
+          type: integer
+          example: 25998000
+
+    CheckoutPayload:
+      type: object
+      description: Данные для следующего блока оформления заказа
+      required:
+        - items
+        - total_amount
+        - currency
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CheckoutItem"
+        total_amount:
+          type: integer
+          example: 13597000
+        currency:
+          type: string
+          example: "RUB"
+
+    CartResponse:
+      type: object
+      required:
+        - items
+        - summary
+        - checkout_payload
+      properties:
+        items:
+          type: array
+          description: Список позиций корзины, обогащённых данными из B2B
+          items:
+            $ref: "#/components/schemas/CartItem"
+        summary:
+          $ref: "#/components/schemas/CartSummary"
+        checkout_payload:
+          $ref: "#/components/schemas/CheckoutPayload"
+
+    CartMutationResponse:
+      type: object
+      description: Ответ после добавления товара или изменения количества
+      required:
+        - message
+        - item
+        - summary
+      properties:
+        message:
+          type: string
+          example: "Позиция корзины успешно обновлена"
+        item:
+          $ref: "#/components/schemas/CartItem"
+        summary:
+          $ref: "#/components/schemas/CartSummary"
 
     # ----- СХЕМЫ ВАЛИДАЦИИ КОРЗИНЫ -----          
     CartValidationResponse:
@@ -2351,7 +2211,7 @@ components:
       required:
         - recommended_product_ids
       properties:
-        recommendedProductIds:
+        recommended_product_ids:
           type: array
           description: Список товаров, которые часто покупают вместе с товарами из корзины пользователя
           items:
