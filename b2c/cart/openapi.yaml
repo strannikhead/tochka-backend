@@ -23,6 +23,8 @@ tags:
     description: Баннеры на главной странице и аналитика (показы, клики)
   - name: Cart
     description: Управление корзиной покупателя
+  - name: Рекомендации
+    description: Получение похожих товаров и подборок
     
 security:
 - BearerAuth: []
@@ -1185,6 +1187,64 @@ paths:
                 code: B2B_UNAVAILABLE
                 message: Product service temporarily unavailable
 
+  /api/v1/products/{id}/similar:
+    get:
+      tags:
+        - Рекомендации
+      summary: Получить похожие товары
+      description: |
+        Возвращает массив товаров, алгоритмически похожих на исходный.
+          никогда не возвращается в списке рекомендаций.
+      operationId: getSimilarProducts
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Уникальный идентификатор (UUID) исходного товара.
+          schema:
+            type: string
+            format: uuid
+            example: "123e4567-e89b-12d3-a456-426614174000"
+        - name: limit
+          in: query
+          required: false
+          description: Ограничение на количество возвращаемых товаров.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+      responses:
+        '200':
+          description: Успешный ответ. Возвращает массив товаров.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimilarProductsResponse'
+        '400':
+          description: Невалидный запрос
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Исходный товар не найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Product Service (B2B) временно недоступен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504':
+          description: Таймаут ответа B2B
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
 
   securitySchemes:
@@ -1754,3 +1814,20 @@ components:
             - "550e8400-e29b-41d4-a716-446655440000"
             - "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
             - "6fa459ea-ee8a-3ca4-894e-db77e160355e"
+
+    SimilarProductsResponse:
+      type: object
+      description: Ответ с массивом похожих товаров
+      properties:
+        items:
+          type: array
+          description: Список рекомендованных товаров
+          items:
+            $ref: "#/components/schemas/Product"
+        total:
+          type: integer
+          description: Общее количество
+          example: 5
+      required:
+        - items
+        - total
