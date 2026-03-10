@@ -1,0 +1,365 @@
+openapi: 3.0.3
+info:
+  title: API для интернет-магазина
+  version: "1.0"
+  description: >
+    API для работы с корзиной, избранным, данными для главной страницы.
+
+servers:
+  - url: https://api.example.com
+
+paths:
+  # --- Корзина ---
+  /api/v1/cart:
+    get:
+      summary: "Получить текущий состав корзины"
+      description: "Возвращает список товаров в корзине."
+      responses:
+        '200':
+          description: "Успешное получение корзины"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CartItem'
+        '400':
+          description: "Некорректный запрос"
+        '401':
+          description: "Не авторизован"
+
+    post:
+      summary: "Добавить товар в корзину"
+      description: "Добавляет указанный товар в корзину."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                productId:
+                  type: uuid
+                skuId:
+                  type: uuid
+                quantity:
+                  type: integer
+                  default: 1
+      responses:
+        '200':
+          description: "Товар успешно добавлен"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartItem'
+        '400':
+          description: "Некорректные данные"
+        '409':
+          description: "Товар уже в корзине или недоступен"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                alreadyInCart:
+                  value:
+                    code: ALREADY_IN_CART
+                    message: "Товар уже добавлен в корзину."
+                blocked:
+                  value:
+                    code: PRODUCT_BLOCKED
+                    message: "Этот товар заблокирован и не доступен для покупки."
+
+    delete:
+      summary: "Удалить все товары из корзины"
+      description: "Полностью очищает корзину, удаляя все товары."
+      responses:
+        '200':
+          description: "Корзина успешно очищена"
+        '401':
+          description: "Не авторизован"
+
+  /api/v1/cart/{itemId}:
+    get:
+      summary: "Получить товар из корзины по ID"
+      description: "Возвращает товар по его ID, с учетом статуса доступности."
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: uuid
+          description: "ID товара в корзине"
+      responses:
+        '200':
+          description: "Успешное получение товара"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartItem'
+        '404':
+          description: "Товар не найден или удален"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartItem'
+      # Исключение для ошибки недоступности B2B:
+        '503':
+          description: "Сервис B2B недоступен"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                b2bUnavailable:
+                  value:
+                    code: B2B_UNAVAILABLE
+                    message: "B2B сервис временно недоступен. Повторите попытку позже."
+
+    put:
+      summary: "Обновить количество товара в корзине"
+      description: "Обновляет количество выбранного товара."
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: uuid
+          description: "ID товара в корзине"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                quantity:
+                  type: integer
+      responses:
+        '200':
+          description: "Обновлено успешно"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartItem'
+        '400':
+          description: "Некорректные данные"
+        '404':
+          description: "Товар не найден"
+        '409':
+          description: "Недоступен или конфликт"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                out_of_stock:
+                  value:
+                    code: OUT_OF_STOCK
+                    message: "Товара больше нет в наличии."
+                blocked:
+                  value:
+                    code: PRODUCT_BLOCKED
+                    message: "Этот товар заблокирован и недоступен."
+
+    delete:
+      summary: "Удалить товар из корзины"
+      description: "Удаляет товар по его ID."
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: uuid
+          description: "ID товара в корзине"
+      responses:
+        '200':
+          description: "Товар успешно удален"
+        '404':
+          description: "Товар не найден"
+        '401':
+          description: "Не авторизован"
+
+  # --- Избранное ---
+  /api/v1/favorites:
+    get:
+      summary: "Получить список избранных товаров"
+      description: "Возвращает список товаров в избранном."
+      responses:
+        '200':
+          description: "Успешное получение списка"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  favorites:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FavoriteItem'
+        '401':
+          description: "Не авторизован"
+
+    post:
+      summary: "Добавить товар в избранное"
+      description: "Добавляет товар в список избранных."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                productId:
+                  type: integer
+                skuId:
+                  type: integer
+      responses:
+        '200':
+          description: "Товар добавлен в избранное"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FavoriteItem'
+        '400':
+          description: "Некорректные данные"
+        '409':
+          description: "Товар уже в избранном"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                alreadyFavorite:
+                  value:
+                    code: ALREADY_FAVORITE
+                    message: "Товар уже в списке избранных."
+
+    delete:
+      summary: "Удалить товар из избранного"
+      description: "Удаляет товар по его ID."
+      parameters:
+        - name: favoriteId
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: "ID записи в избранном"
+      responses:
+        '200':
+          description: "Удалено успешно"
+        '404':
+          description: "Товар не найден"
+        '401':
+          description: "Не авторизован"
+
+  # --- Главная страница ---
+  /api/v1/main:
+    get:
+      summary: "Получить данные для главной страницы"
+      description: "Возвращает данные для отображения баннеров, категорий и топовых товаров."
+      responses:
+        '200':
+          description: "Данные успешно получены"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  banners:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Banner'
+                  featuredCategories:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Category'
+                  topProducts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ProductBrief'
+
+# --- Общие схемы ---
+components:
+  schemas:
+    CartItem:
+      type: object
+      properties:
+        id:
+          type: uuid
+        productId:
+          type: uuid
+        skuId:
+          type: uuid
+        name:
+          type: string
+        quantity:
+          type: integer
+        price:
+          type: number
+          format: float
+        isAvailable:
+          type: boolean
+        availabilityStatus:
+          type: string
+          description: "Статус доступности товара. Может быть ACTIVE, DELETED, BLOCKED и др."
+          enum:
+            - ACTIVE
+            - DELETED
+            - BLOCKED
+
+    FavoriteItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        productId:
+          type: integer
+        skuId:
+          type: integer
+        name:
+          type: string
+        price:
+          type: number
+          format: float
+
+    Banner:
+      type: object
+      properties:
+        imageUrl:
+          type: string
+        link:
+          type: string
+
+    Category:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+
+    ProductBrief:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        price:
+          type: number
+          format: float
+
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          nullable: true
