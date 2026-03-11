@@ -1,5 +1,7 @@
 # NeoMarket Protocols
 
+[![API Docs](https://img.shields.io/badge/API%20Docs-Swagger%20UI-85ea2d?logo=swagger)](https://urfu2026-neomarket.github.io/neomarket-protocols/)
+
 OpenAPI-спецификации модулей NeoMarket. Восстановлены на Protocol Summit.
 
 ## Структура
