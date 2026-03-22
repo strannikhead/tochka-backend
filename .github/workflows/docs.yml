@@ -1,0 +1,30 @@
+name: Deploy API Docs
+on:
+  push:
+    branches: [master]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm install -g @redocly/cli
+      - run: |
+          mkdir -p docs/bundled
+          redocly bundle b2b/openapi.yaml -o docs/bundled/b2b.yaml
+          redocly bundle b2c/catalog/openapi.yaml -o docs/bundled/b2c-catalog.yaml
+          redocly bundle b2c/cart/openapi.yaml -o docs/bundled/b2c-cart.yaml
+          redocly bundle b2c/orders/openapi.yaml -o docs/bundled/b2c-orders.yaml
+          redocly bundle moderation/openapi.yaml -o docs/bundled/moderation.yaml
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/
+      - id: deploy
+        uses: actions/deploy-pages@v4

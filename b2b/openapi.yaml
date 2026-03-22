@@ -1,0 +1,147 @@
+openapi: 3.0.3
+info:
+  title: NeoMarket B2B (Seller Cabinet)
+  version: "1.0"
+  description: |
+    Кабинет продавца. Создание товаров, SKU, управление ценами, накладные.
+    Связи с Moderation и B2C — частично восстановлены, детали проектируются.
+
+paths:
+  /api/v1/products:
+    post:
+      summary: Создать товар
+      tags: [Products]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              # Формат тела запроса — проектируется
+      responses:
+        "201":
+          description: Товар создан
+
+  /api/v1/products/{id}:
+    get:
+      summary: Получить товар со всеми SKU
+      tags: [Products]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Товар с SKU, характеристиками и фото
+          content:
+            application/json:
+              schema:
+                $ref: "../shared/schemas.yaml#/components/schemas/Product"
+              example:
+                id: 42
+                title: "iPhone 15 Pro Max"
+                description: "Флагман Apple..."
+                status: "MODERATED"
+                category:
+                  id: 3
+                  name: "Смартфоны"
+                images:
+                  - url: "/s3/iphone15-1.jpg"
+                    ordering: 0
+                characteristics:
+                  - name: "Бренд"
+                    value: "Apple"
+                skus:
+                  - id: 101
+                    name: "256GB Black"
+                    price: 12999000
+                    activeQuantity: 5
+                    characteristics:
+                      - name: "Цвет"
+                        value: "Чёрный"
+                      - name: "Объём памяти"
+                        value: "256 ГБ"
+                  - id: 102
+                    name: "256GB White"
+                    price: 12999000
+                    activeQuantity: 0
+        "404":
+          description: Товар не найден
+
+    put:
+      summary: Изменить товар
+      tags: [Products]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Товар обновлён
+
+  /api/v1/skus:
+    post:
+      summary: Создать SKU
+      tags: [SKU]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "201":
+          description: SKU создан
+
+    put:
+      summary: Изменить SKU
+      tags: [SKU]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: SKU обновлён
+
+  /api/v1/invoices:
+    post:
+      summary: Создать накладную
+      tags: [Invoices]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "201":
+          description: Накладная создана
+
+  /api/v1/invoices/accept:
+    post:
+      summary: Принять накладную (склад)
+      tags: [Invoices]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Накладная принята, остатки обновлены
+
+  # ??? — Эндпоинты для B2C (каталог, резервирование) — проектируются

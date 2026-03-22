@@ -1,0 +1,1429 @@
+openapi: 3.0.3
+info:
+  title: "NeoMarket B2C: Каталог + Карточка товара"
+  version: "0.1"
+  description: |
+    Проектируется синдикатом Forge.
+    Домены: текстовый поиск, фильтры, пагинация, карточка товара, SKU, рекомендации.
+
+paths:
+  /api/v1/products/{product_id}/skus:
+    get:
+      summary: Получить список SKU товара (кратко - для отображения в карточке)
+      security:
+        - bearerHttpAuthentication: []
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Успешный ответ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkusShort'
+              example:
+                - name: "iPhone 14 Pro 128GB Silver"
+                  price: 999.99
+                  image:
+                    url: "https://example.com/images/sku1.jpg"
+                    order: 1
+                - name: "iPhone 14 Pro 256GB Gold"
+                  price: 1099.99
+                  image:
+                    url: "https://example.com/images/sku2.jpg"
+                    order: 2
+        '400':
+          description: Некорректный id
+        '401':
+          description: Не авторизован
+        '403':
+          description: Нет прав (напр., товар на модерации)
+        '404':
+          description: Товар не найден
+
+  /api/v1/products/{product_id}/skus/{sku_id}:
+    get:
+      summary: Получить информацию о конкретном SKU
+      security:
+        - bearerHttpAuthentication: []
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: sku_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Успешный ответ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sku'
+              example:
+                id: "660e8400-e29b-41d4-a716-446655440001"
+                name: "iPhone 14 Pro 128GB Silver"
+                price: 999.99
+                quantity: 15
+                characteristics:
+                  - name: "COLOR"
+                    value: "Silver"
+                  - name: "MEMORY"
+                    value: "128GB"
+                images:
+                  - url: "https://example.com/images/sku1.jpg"
+                    order: 1
+        '400':
+          description: Некорректный id
+        '401':
+          description: Не авторизован
+        '403':
+          description: Нет прав (напр., товар на модерации)
+        '404':
+          description: Товар не найден
+
+  /api/v1/products:
+    get:
+      summary: Получить список товаров (сокращённая версия) с пагинацией
+      security: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            example: 10
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            example: 0
+        - name: category_id
+          in: query
+          required: false
+          description: Категория в фильтрах
+          schema:
+            type: string
+            format: uuid
+            description: Идентификатор категории (UUID)
+            example: "123e4567-e89b-12d3-a456-426614174000"
+        - name: filters
+          in: query
+          required: false
+          description: Динамические фильтры (ключи в snake_case)
+          style: deepObject
+          explode: true
+          schema:
+            type: object
+            additionalProperties:
+              oneOf:
+                - type: string
+                - type: array
+                  items:
+                    type: string
+                - type: number
+                - type: boolean
+          examples:
+            byBrandAndMemory:
+              summary: Фильтры для телефонов по бренду и памяти
+              value:
+                brand:
+                  - apple
+                  - samsung
+                memory: 256
+        - name: sort
+          in: query
+          required: false
+          description: Параметр сортировки товаров
+          schema:
+            type: string
+            enum: [rating, popularity, price_asc, price_desc, date_desc, discount_desc]
+            example: price_asc
+        - name: search
+          in: query
+          description: |
+            Поисковый запрос для полнотекстового поиска по названию и описанию товара.
+            Минимальная длина: 3 символа (после удаления стоп-слов).
+          required: false
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 255
+            example: "беспроводные наушники"
+      responses:
+        '200':
+          description: Успешный ответ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductShortListResponse'
+              example:
+                total_count: 42
+                limit: 10
+                offset: 0
+                items:
+                  - id: "770e8400-e29b-41d4-a716-446655440002"
+                    title: "iPhone 14 Pro"
+                    image: "https://example.com/images/iphone14.jpg"
+                    price: 999.99
+                    in_stock: true
+                    is_in_cart: false
+                  - id: "770e8400-e29b-41d4-a716-446655440003"
+                    title: "Samsung Galaxy S23"
+                    image: "https://example.com/images/s23.jpg"
+                    price: 899.99
+                    in_stock: true
+                    is_in_cart: true
+        '400':
+          description: Некорректные параметры запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                message: "Invalid sort parameter. Allowed values: rating, popularity, price_asc, price_desc, date_desc, discount_desc"
+        '500':
+          description: Внутренняя ошибка сервера
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                message: "Internal server error"
+
+  /api/v1/products/{id}:
+    get:
+      summary: Получить полный товар
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Успешный ответ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+              example:
+                id: "770e8400-e29b-41d4-a716-446655440002"
+                slug: "iphone-14-pro"
+                title: "iPhone 14 Pro"
+                description: "Смартфон Apple iPhone 14 Pro с диагональю 6.1 дюйма"
+                images:
+                  - url: "https://example.com/images/iphone14.jpg"
+                    order: 1
+                  - url: "https://example.com/images/iphone14_back.jpg"
+                    order: 2
+                status: "MODERATED"
+                characteristics:
+                  - name: "BRAND"
+                    value: "Apple"
+                  - name: "COLOR"
+                    value: "Silver"
+                skus:
+                  - id: "660e8400-e29b-41d4-a716-446655440001"
+                    name: "iPhone 14 Pro 128GB Silver"
+                    price: 999.99
+                    quantity: 15
+                    characteristics:
+                      - name: "COLOR"
+                        value: "Silver"
+                      - name: "MEMORY"
+                        value: "128GB"
+                    images:
+                      - url: "https://example.com/images/sku1.jpg"
+                        order: 1
+        '400':
+          description: Некорректный id
+        '404':
+          description: Товар не найден
+
+  /api/v1/products/{id}/similar:
+    get:
+      summary: Получить похожие товары
+      description: Запрашивает похожие товары из текущей и родительских категорий
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Идентификатор товара (UUID)
+          schema:
+            type: string
+            format: uuid
+            example: "770e8400-e29b-41d4-a716-446655440002"
+        - name: category
+          in: query
+          required: true
+          description: Идентификатор категории товара
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 8
+            example: 4
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+            example: 8
+      responses:
+        '200':
+          description: Успешный ответ
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - items
+                  - total_count
+                  - limit
+                  - offset
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ProductShort'
+                  total_count:
+                    type: integer
+                    description: Общее количество найденных похожих товаров
+                    example: 12
+                  limit:
+                    type: integer
+                    example: 4
+                  offset:
+                    type: integer
+                    example: 8
+        '400':
+          description: Некорректный ID категории
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                message: "Nonexistent category id"
+        '404':
+          description: Товар не найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                message: "Product not found"
+
+  /api/v1/categories:
+    get:
+      summary: Получить дерево категорий
+      description: |
+        Возвращает дерево категорий для витрины покупателя:
+        левое меню, выбор категории в каталоге, построение breadcrumbs.
+
+        B2B возвращает плоский список категорий, а B2C собирает из него дерево.
+      security: []
+      responses:
+        '200':
+          description: Успешный ответ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategoryTreeResponse'
+              example:
+                items:
+                  - id: "123e4567-e89b-12d3-a456-426614174002"
+                    name: Электроника
+                    parent_id: null
+                    children:
+                      - id: "123e4567-e89b-12d3-a456-426614174003"
+                        name: Смартфоны
+                        parent_id: "123e4567-e89b-12d3-a456-426614174002"
+                        children:
+                          - id: "123e4567-e89b-12d3-a456-426614174004"
+                            name: Android
+                            parent_id: "123e4567-e89b-12d3-a456-426614174003"
+                            children: []
+                          - id: "123e4567-e89b-12d3-a456-426614174005"
+                            name: iPhone
+                            parent_id: "123e4567-e89b-12d3-a456-426614174003"
+                            children: []
+                      - id: "123e4567-e89b-12d3-a456-426614174006"
+                        name: Ноутбуки
+                        parent_id: "123e4567-e89b-12d3-a456-426614174002"
+                        children:
+                          - id: "123e4567-e89b-12d3-a456-426614174007"
+                            name: Игровые ноутбуки
+                            parent_id: "123e4567-e89b-12d3-a456-426614174006"
+                            children: []
+                          - id: "123e4567-e89b-12d3-a456-426614174008"
+                            name: Ультрабуки
+                            parent_id: "123e4567-e89b-12d3-a456-426614174006"
+                            children: []
+                      - id: "123e4567-e89b-12d3-a456-426614174009"
+                        name: Телевизоры
+                        parent_id: "123e4567-e89b-12d3-a456-426614174002"
+                        children: []
+                  - id: "123e4567-e89b-12d3-a456-426614174010"
+                    name: Одежда
+                    parent_id: null
+                    children:
+                      - id: "123e4567-e89b-12d3-a456-426614174011"
+                        name: Мужская одежда
+                        parent_id: "123e4567-e89b-12d3-a456-426614174010"
+                        children:
+                          - id: "123e4567-e89b-12d3-a456-426614174012"
+                            name: Футболки
+                            parent_id: "123e4567-e89b-12d3-a456-426614174011"
+                            children: []
+                          - id: "123e4567-e89b-12d3-a456-426614174013"
+                            name: Джинсы
+                            parent_id: "123e4567-e89b-12d3-a456-426614174011"
+                            children: []
+                      - id: "123e4567-e89b-12d3-a456-426614174014"
+                        name: Женская одежда
+                        parent_id: "123e4567-e89b-12d3-a456-426614174010"
+                        children:
+                          - id: "123e4567-e89b-12d3-a456-426614174015"
+                            name: Платья
+                            parent_id: "123e4567-e89b-12d3-a456-426614174014"
+                            children: []
+                          - id: "123e4567-e89b-12d3-a456-426614174016"
+                            name: Куртки
+                            parent_id: "123e4567-e89b-12d3-a456-426614174014"
+                            children: []
+        '502':
+          description: Ошибка upstream-сервиса категорий
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamErrorResponse'
+              example:
+                error: upstream_unavailable
+                message: Category service temporarily unavailable
+        '503':
+          description: Сервис категорий временно недоступен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamErrorResponse'
+              example:
+                error: upstream_unavailable
+                message: Category service temporarily unavailable
+
+  /api/v1/categories/{id}:
+    get:
+      summary: Получить детальную информацию о категории
+      description: |
+        Возвращает полную информацию о категории, включая:
+        - Название и описание
+        - Информацию о родительской категории
+        - Количество товаров (опционально, через query-параметр)
+        - SEO-данные и мета-теги для поисковой оптимизации
+        
+        Используется для:
+        - Отображения заголовка и описания страницы категории
+        - Формирования мета-тегов для SEO
+        - Построения навигации (связь с родителем)
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Идентификатор категории (UUID)
+          schema:
+            type: string
+            format: uuid
+            example: "123e4567-e89b-12d3-a456-426614174001"
+        - name: include_product_count
+          in: query
+          required: false
+          description: |
+            Включить количество товаров в категории.
+            По умолчанию false, так как подсчёт может быть ресурсоёмким.
+          schema:
+            type: boolean
+            default: false
+            example: true
+        - name: lang
+          in: query
+          required: false
+          description: Язык ответа (влияет на локализованные поля)
+          schema:
+            type: string
+            enum: [ru, en]
+            default: ru
+      responses:
+        '200':
+          description: Успешный ответ
+          headers:
+            Cache-Control:
+              description: Кэширование ответа
+              schema:
+                type: string
+                example: public, max-age=3600
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategoryDetailResponse'
+              examples:
+                withProductCount:
+                  summary: Ответ с количеством товаров
+                  value:
+                    id: "123e4567-e89b-12d3-a456-426614174003"
+                    name: "Смартфоны"
+                    slug: "smartphones"
+                    description: "Мобильные телефоны и смартфоны ведущих производителей"
+                    parent:
+                      id: "123e4567-e89b-12d3-a456-426614174002"
+                      name: "Электроника"
+                      slug: "electronics"
+                    product_count: 1542
+                    seo:
+                      title: "Купить смартфон в интернет-магазине | Marketplace"
+                      description: "Большой выбор смартфонов по выгодным ценам. Бесплатная доставка. Гарантия качества."
+                      keywords:
+                        - смартфоны
+                        - мобильные телефоны
+                        - купить смартфон
+                        - телефоны недорого
+                    meta_tags:
+                      og_title: "Смартфоны | Marketplace"
+                      og_description: "Купить смартфон в интернет-магазине. Большой выбор, низкие цены."
+                      og_image: "https://.../categories/smartphones-og.jpg"
+                      twitter_card: "summary_large_image"
+                    image_url: "https://.../categories/smartphones.jpg"
+                    is_active: true
+                    created_at: "2024-01-15T10:30:00Z"
+                    updated_at: "2024-03-01T14:20:00Z"
+                withoutProductCount:
+                  summary: Ответ без количества товаров
+                  value:
+                    id: "123e4567-e89b-12d3-a456-426614174003"
+                    name: "Смартфоны"
+                    slug: "smartphones"
+                    description: "Мобильные телефоны и смартфоны ведущих производителей"
+                    parent:
+                      id: "123e4567-e89b-12d3-a456-426614174002"
+                      name: "Электроника"
+                      slug: "electronics"
+                    product_count: null
+                    seo:
+                      title: "Купить смартфон в интернет-магазине | Marketplace"
+                      description: "Большой выбор смартфонов по выгодным ценам."
+                      keywords: []
+                    meta_tags: {}
+                    image_url: null
+                    is_active: true
+                    created_at: "2024-01-15T10:30:00Z"
+                    updated_at: "2024-03-01T14:20:00Z"
+                rootCategory:
+                  summary: Корневая категория (без родителя)
+                  value:
+                    id: "123e4567-e89b-12d3-a456-426614174002"
+                    name: "Электроника"
+                    slug: "electronics"
+                    description: "Электроника и гаджеты"
+                    parent: null
+                    product_count: 15420
+                    seo:
+                      title: "Электроника — Marketplace"
+                      description: "Купить электронику онлайн"
+                      keywords:
+                        - электроника
+                        - гаджеты
+                    meta_tags:
+                      og_title: "Электроника | Marketplace"
+                    image_url: "https://.../categories/electronics.jpg"
+                    is_active: true
+                    created_at: "2024-01-10T08:00:00Z"
+                    updated_at: "2024-02-20T12:00:00Z"
+        '400':
+          description: Некорректный идентификатор категории
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                message: "id must be a valid UUID"
+        '404':
+          description: Категория не найдена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                message: "Category not found"
+        '503':
+          description: Сервис категорий временно недоступен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                message: "Category service temporarily unavailable"
+
+  /api/v1/categories/{id}/filters:
+    get:
+      summary: Список доступных фильтров для категории
+      description: |
+        Возвращает перечень характеристик (фильтров), по которым можно фильтровать товары
+        в указанной категории, а также все возможные значения для каждой характеристики.
+        Используется для построения интерфейса фильтрации на странице категории.
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Идентификатор категории (UUID)
+          schema:
+            type: string
+            format: uuid
+            example: "123e4567-e89b-12d3-a456-426614174001"
+      responses:
+        "200":
+          description: Успешный ответ
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FiltersResponse"
+              example:
+                items:
+                  - slug: brand
+                    name: Бренд
+                    type: list
+                    value:
+                      - Samsung
+                      - Apple
+                      - Xiaomi
+                  - slug: memory
+                    name: Объём памяти
+                    type: list
+                    value:
+                      - 64
+                      - 128
+                      - 256
+                      - 512
+                  - slug: color
+                    name: Цвет
+                    type: list
+                    value:
+                      - черный
+                      - белый
+                      - синий
+                      - красный
+                  - slug: price
+                    name: Цена
+                    type: range
+                    min: 9990
+                    max: 150000
+                  - slug: original
+                    name: Оригинальный товар
+                    type: switch
+        "400":
+          description: Некорректный идентификатор категории
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                message: Invalid category id
+        "404":
+          description: Категория не найдена
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                message: Category not found
+
+  /api/v1/catalog/facets:
+    get:
+      summary: Список фасетов (фильтров) для категории с подсчётом значений
+      description: |
+        Возвращает список фасетов (фильтров) для указанной категории и для каждого значения — количество товаров (count), соответствующих этому значению при текущих применённых фильтрах.
+        Вызывается при загрузке страницы категории и при каждом изменении фильтров на клиенте (чтобы обновить счётчики рядом с опциями фильтров).
+      security: []
+      parameters:
+        - name: category_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Идентификатор категории (UUID), для которой считаются фасеты
+        - name: filters
+          in: query
+          required: false
+          schema:
+            type: string
+          description: |
+            Текущие выбранные фильтры; формат может быть либо повторяющимися параметрами (brand=Apple&color=Black), либо URL-encoded JSON (filters=%7B%22brand%22%3A%5B%22Apple%22%5D%7D)
+      responses:
+        '200':
+          description: Успешный ответ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FacetsResponse'
+              example:
+                category_id: "123e4567-e89b-12d3-a456-426614174001"
+                facets:
+                  - name: brand
+                    values:
+                      - value: Apple
+                        count: 124
+                      - value: Samsung
+                        count: 98
+                      - value: Xiaomi
+                        count: 76
+                  - name: color
+                    values:
+                      - value: Black
+                        count: 60
+                      - value: White
+                        count: 40
+                      - value: Blue
+                        count: 24
+                  - name: storage
+                    values:
+                      - value: 128GB
+                        count: 55
+                      - value: 256GB
+                        count: 45
+        '400':
+          description: Невалидные данные (например, отсутствует category_id или неверный формат filters)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                message: "category_id is required"
+        '404':
+          description: Категория не найдена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                message: "Category not found"
+
+  /api/v1/breadcrumbs:
+    get:
+      summary: Построение навигационной цепочки
+      description: |
+        Возвращает массив предков от корня до указанной категории или товара.
+
+        Необходимо передать **ровно один параметр**:
+        - category_id
+        - product_id
+      parameters:
+        - name: category_id
+          in: query
+          required: false
+          description: id категории для построения цепочки
+          schema:
+            type: string
+            format: uuid
+        - name: product_id
+          in: query
+          required: false
+          description: id товара (сначала определяется его категория)
+          schema:
+            type: string
+            format: uuid
+        - name: lang
+          in: query
+          required: false
+          description: язык ответа
+          schema:
+            type: string
+            enum: [ru, en, kk]
+            default: ru
+      responses:
+        '200':
+          description: успешное построение цепочки
+          headers:
+            cache-control:
+              description: кэширование ответа
+              schema:
+                type: string
+                example: public, max-age=300
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/breadcrumb_response'
+        '400':
+          description: ошибка параметров запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error_response'
+              examples:
+                missing_param:
+                  value:
+                    error: missing_param
+                    message: category_id or product_id must be provided
+                ambiguous_param:
+                  value:
+                    error: ambiguous_param
+                    message: only one of category_id or product_id must be provided
+                invalid_param:
+                  value:
+                    error: invalid_param
+                    message: parameter must be a valid UUID
+        '404':
+          description: категория или товар не найдены
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error_response'
+              examples:
+                category_not_found:
+                  value:
+                    error: category_not_found
+                    message: category not found
+                product_not_found:
+                  value:
+                    error: product_not_found
+                    message: product not found
+        '422':
+          description: ошибка иерархии категории
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error_response'
+              example:
+                error: orphan_node
+                message: category hierarchy is broken
+        '503':
+          description: ошибка внешнего catalog api
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error_response'
+              example:
+                error: upstream_error
+                message: catalog api unavailable
+
+components:
+  securitySchemes:
+    bearerHttpAuthentication:
+      description: Bearer token (JWT)
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    CharacteristicName:
+      type: string
+      description: Наименование характеристики товара (например, "BRAND", "COLOR", "SIZE")
+      example: "COLOR"
+
+    Characteristic:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Идентификатор характеристики (опционально, может отсутствовать при создании)
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        name:
+          $ref: '#/components/schemas/CharacteristicName'
+        value:
+          type: string
+          description: Значение характеристики
+          example: "Red"
+      required:
+        - name
+        - value
+      example:
+        name: "COLOR"
+        value: "Silver"
+
+    Image:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Ссылка на изображение
+          example: "https://example.com/images/1.jpg"
+        order:
+          type: integer
+          description: Порядок отображения
+          example: 1
+      required:
+        - url
+        - order
+      example:
+        url: "https://example.com/images/sku1.jpg"
+        order: 1
+
+    Sku:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Идентификатор SKU
+          example: "660e8400-e29b-41d4-a716-446655440001"
+        name:
+          type: string
+          description: Название SKU
+          example: "iPhone 14 Pro 128GB Silver"
+        price:
+          type: number
+          description: Цена
+          example: 999.99
+        quantity:
+          type: integer
+          description: Количество на складе
+          example: 15
+        characteristics:
+          type: array
+          items:
+            $ref: '#/components/schemas/Characteristic'
+        images:
+          type: array
+          description: Изображения SKU (опционально)
+          items:
+            $ref: '#/components/schemas/Image'
+      required:
+        - id
+        - name
+        - price
+        - quantity
+        - characteristics
+      example:
+        id: "660e8400-e29b-41d4-a716-446655440001"
+        name: "iPhone 14 Pro 128GB Silver"
+        price: 999.99
+        quantity: 15
+        characteristics:
+          - name: "COLOR"
+            value: "Silver"
+          - name: "MEMORY"
+            value: "128GB"
+        images:
+          - url: "https://example.com/images/sku1.jpg"
+            order: 1
+
+    SkuShort:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Название SKU
+        price:
+          type: number
+          description: Цена
+        image:
+          $ref: '#/components/schemas/Image'
+      required:
+        - name
+        - price
+        - image
+      example:
+        name: "iPhone 14 Pro 128GB Silver"
+        price: 999.99
+        image:
+          url: "https://example.com/images/sku1.jpg"
+          order: 1
+
+    SkusShort:
+      type: array
+      items:
+        $ref: '#/components/schemas/SkuShort'
+      example:
+        - name: "iPhone 14 Pro 128GB Silver"
+          price: 999.99
+          image:
+            url: "https://example.com/images/sku1.jpg"
+            order: 1
+        - name: "iPhone 14 Pro 256GB Gold"
+          price: 1099.99
+          image:
+            url: "https://example.com/images/sku2.jpg"
+            order: 2
+
+    ProductStatus:
+      type: string
+      enum: [CREATED, ON_MODERATED, MODERATED, BLOCKED]
+      description: Статус публикации товара
+      example: "CREATED"
+
+    Product:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+          example: "iphone-14-pro"
+        title:
+          type: string
+          example: "iPhone 14 Pro"
+        description:
+          type: string
+          example: "Смартфон Apple iPhone 14 Pro с диагональю 6.1 дюйма"
+        images:
+          type: array
+          items:
+            $ref: '#/components/schemas/Image'
+        status:
+          $ref: '#/components/schemas/ProductStatus'
+        characteristics:
+          type: array
+          items:
+            $ref: '#/components/schemas/Characteristic'
+        skus:
+          type: array
+          items:
+            $ref: '#/components/schemas/Sku'
+      required:
+        - id
+        - slug
+        - title
+        - description
+        - images
+        - status
+        - characteristics
+        - skus
+
+    ProductShort:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "770e8400-e29b-41d4-a716-446655440002"
+        title:
+          type: string
+          example: "iPhone 14 Pro"
+        image:
+          type: string
+          format: uri
+          description: URL главного изображения товара
+          example: "https://example.com/images/iphone14.jpg"
+        price:
+          type: number
+          example: 999.99
+        in_stock:
+          type: boolean
+          example: true
+        is_in_cart:
+          type: boolean
+          example: false
+      required:
+        - id
+        - title
+        - image
+        - price
+        - in_stock
+        - is_in_cart
+
+    ProductShortListResponse:
+      type: object
+      properties:
+        total_count:
+          type: integer
+          example: 42
+        limit:
+          type: integer
+          example: 10
+        offset:
+          type: integer
+          example: 0
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductShort'
+      required:
+        - total_count
+        - limit
+        - offset
+        - items
+
+    FiltersResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Filter"
+
+    Filter:
+      type: object
+      required:
+        - slug
+        - name
+        - type
+      properties:
+        slug:
+          type: string
+          description: Уникальный идентификатор характеристики
+        name:
+          type: string
+          description: Отображаемое название фильтра
+        type:
+          type: string
+          description: Тип фильтра
+          enum:
+            - list
+            - range
+            - switch
+        value:
+          type: array
+          description: Возможные значения (для type=list)
+          items:
+            oneOf:
+              - type: string
+              - type: number
+        min:
+          type: number
+          description: Минимальное значение (для type=range)
+        max:
+          type: number
+          description: Максимальное значение (для type=range)
+
+    ErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string
+      example:
+        message: "Invalid request"
+
+    CategoryTreeResponse:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          description: Корневые категории с вложенными дочерними узлами
+          items:
+            $ref: '#/components/schemas/CategoryNode'
+
+    CategoryNode:
+      type: object
+      required:
+        - id
+        - name
+        - children
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Идентификатор категории (UUID)
+          example: "123e4567-e89b-12d3-a456-426614174002"
+        name:
+          type: string
+          description: Отображаемое название категории
+          example: Электроника
+        parent_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Идентификатор родительской категории (UUID)
+          example: null
+        children:
+          type: array
+          description: Дочерние категории
+          items:
+            $ref: '#/components/schemas/CategoryNode'
+
+    UpstreamErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          example: upstream_unavailable
+        message:
+          type: string
+          example: Category service temporarily unavailable
+
+    FacetValue:
+      type: object
+      properties:
+        value:
+          type: string
+        count:
+          type: integer
+      required:
+        - value
+        - count
+      example:
+        value: "Apple"
+        count: 124
+
+    Facet:
+      type: object
+      properties:
+        name:
+          type: string
+        values:
+          type: array
+          items:
+            $ref: '#/components/schemas/FacetValue'
+      required:
+        - name
+        - values
+
+    FacetsResponse:
+      type: object
+      properties:
+        category_id:
+          type: string
+          format: uuid
+        facets:
+          type: array
+          items:
+            $ref: '#/components/schemas/Facet'
+      required:
+        - category_id
+        - facets
+
+    breadcrumb_item:
+      type: object
+      required:
+        - id
+        - slug
+        - name
+        - level
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: id элемента навигации
+          example: "123e4567-e89b-12d3-a456-426614174003"
+        slug:
+          type: string
+          description: чпу-путь элемента
+          example: audio
+        name:
+          type: string
+          description: отображаемое название
+          example: Наушники и аудиотехника
+        url:
+          type: string
+          description: полная ссылка на категорию
+          example: /catalog/electronics/audio
+        level:
+          type: integer
+          description: уровень вложенности (0 — корень)
+          example: 1
+        is_current:
+          type: boolean
+          description: является ли элемент текущим
+          default: false
+          example: true
+
+    breadcrumb_meta:
+      type: object
+      properties:
+        resolved_via:
+          type: string
+          enum:
+            - category_id
+            - product_id
+          description: через какой параметр был разрешён запрос
+          example: product_id
+        category_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174002"
+        product_id:
+          type: string
+          format: uuid
+          example: "770e8400-e29b-41d4-a716-446655440002"
+
+    breadcrumb_response:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/breadcrumb_item'
+        meta:
+          $ref: '#/components/schemas/breadcrumb_meta'
+
+    error_response:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: код ошибки
+          example: missing_param
+        message:
+          type: string
+          description: описание ошибки
+          example: category_id or product_id must be provided
+
+    # Новые схемы для детальной информации о категории
+    CategoryDetailResponse:
+      type: object
+      required:
+        - id
+        - name
+        - slug
+        - seo
+        - meta_tags
+        - is_active
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Уникальный идентификатор категории
+          example: "123e4567-e89b-12d3-a456-426614174003"
+        name:
+          type: string
+          description: Название категории
+          example: "Смартфоны"
+        slug:
+          type: string
+          description: URL-friendly идентификатор категории
+          example: "smartphones"
+        description:
+          type: string
+          nullable: true
+          description: Описание категории для отображения на странице
+          example: "Мобильные телефоны и смартфоны ведущих производителей"
+        parent:
+          $ref: '#/components/schemas/CategoryParent'
+        product_count:
+          type: integer
+          nullable: true
+          description: |
+            Количество товаров в категории.
+            Возвращается только если include_product_count=true.
+            null, если подсчёт не запрашивался.
+          example: 1542
+        seo:
+          $ref: '#/components/schemas/CategorySeo'
+        meta_tags:
+          $ref: '#/components/schemas/CategoryMetaTags'
+        image_url:
+          type: string
+          format: uri
+          nullable: true
+          description: URL изображения категории
+          example: "https://.../categories/smartphones.jpg"
+        is_active:
+          type: boolean
+          description: Флаг активности категории (отображается ли на витрине)
+          example: true
+        created_at:
+          type: string
+          format: date-time
+          description: Дата создания категории
+          example: "2024-01-15T10:30:00Z"
+        updated_at:
+          type: string
+          format: date-time
+          description: Дата последнего обновления категории
+          example: "2024-03-01T14:20:00Z"
+
+    CategoryParent:
+      type: object
+      nullable: true
+      description: Информация о родительской категории (null для корневых категорий)
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Идентификатор родительской категории
+          example: "123e4567-e89b-12d3-a456-426614174002"
+        name:
+          type: string
+          description: Название родительской категории
+          example: "Электроника"
+        slug:
+          type: string
+          description: Slug родительской категории
+          example: "electronics"
+      required:
+        - id
+        - name
+        - slug
+
+    CategorySeo:
+      type: object
+      description: SEO-данные категории для поисковой оптимизации
+      required:
+        - title
+        - description
+      properties:
+        title:
+          type: string
+          description: SEO-заголовок страницы (для тега <title>)
+          example: "Купить смартфон в интернет-магазине | Marketplace"
+        description:
+          type: string
+          description: SEO-описание страницы (для мета-тега description)
+          example: "Большой выбор смартфонов по выгодным ценам. Бесплатная доставка."
+        keywords:
+          type: array
+          description: Ключевые слова для мета-тега keywords
+          items:
+            type: string
+          example:
+            - смартфоны
+            - мобильные телефоны
+            - купить смартфон
+
+    CategoryMetaTags:
+      type: object
+      description: Дополнительные мета-теги для социальных сетей и поисковых систем (Open Graph, Twitter и др.)
+      properties:
+        og_title:
+          type: string
+          description: Заголовок для Open Graph
+          example: "Смартфоны | Marketplace"
+        og_description:
+          type: string
+          description: Описание для Open Graph
+          example: "Купить смартфон в интернет-магазине. Большой выбор, низкие цены."
+        og_image:
+          type: string
+          format: uri
+          description: Изображение для Open Graph
+          example: "https://.../categories/smartphones-og.jpg"
+        twitter_card:
+          type: string
+          description: Тип карточки Twitter
+          example: "summary_large_image"
+      additionalProperties: true

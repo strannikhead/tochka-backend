@@ -1,0 +1,11 @@
+extends:
+  - spectral:oas
+
+rules:
+  # Для начала не будем строги, иначе офигеем добавлять спеки
+  info-description: off
+  oas3-api-servers: off
+  operation-operationId: off
+  operation-description: off
+  operation-tags: off
+  no-$ref-siblings: off

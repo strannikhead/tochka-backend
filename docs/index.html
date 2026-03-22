@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>NeoMarket API</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist/swagger-ui.css">
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist/swagger-ui-bundle.js"></script>
+  <script src="https://unpkg.com/swagger-ui-dist/swagger-ui-standalone-preset.js"></script>
+  <script>
+    SwaggerUIBundle({
+      urls: [
+        { url: "bundled/b2b.yaml", name: "B2B — Seller Cabinet" },
+        { url: "bundled/b2c-catalog.yaml", name: "B2C — Каталог" },
+        { url: "bundled/b2c-cart.yaml", name: "B2C — Корзина + Избранное" },
+        { url: "bundled/b2c-orders.yaml", name: "B2C — Заказы" },
+        { url: "bundled/moderation.yaml", name: "Moderation" }
+      ],
+      dom_id: '#swagger-ui',
+      presets: [
+        SwaggerUIBundle.presets.apis,
+        SwaggerUIStandalonePreset
+      ],
+      layout: "StandaloneLayout"
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,84 @@
+openapi: 3.0.3
+info:
+  title: NeoMarket Moderation
+  version: "1.0"
+  description: |
+    Модуль модерации товаров.
+
+    Логика работы:
+    1. Moderation узнаёт что товар создан или изменён (формат события — ???)
+    2. Запрашивает данные товара из B2B (GET /api/v1/products/{id})
+    3. Сохраняет снимок товара. Если товар изменён — два снимка: "до" и "после"
+    4. Модератор берёт карточку из очереди и проверяет
+    5. Одобряет или блокирует — и сообщает B2B (формат события — ???)
+
+paths:
+  /api/v1/product-moderation/get-next:
+    post:
+      summary: Следующая карточка из очереди
+      tags: [Queue]
+      responses:
+        "200":
+          description: Карточка для проверки
+          content:
+            application/json:
+              schema:
+                type: object
+                # Формат ответа — проектируется
+        "204":
+          description: Очередь пуста
+
+  /api/v1/products/{id}/approve:
+    post:
+      summary: Одобрить товар
+      tags: [Decisions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Товар одобрен, статус → MODERATED
+        "404":
+          description: Товар не найден в очереди
+
+  /api/v1/products/{id}/decline:
+    post:
+      summary: Заблокировать товар (с причиной)
+      tags: [Decisions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              # Что нужно, чтобы продавец понял что исправить?
+              # Достаточно общей причины — или надо указать конкретные поля?
+      responses:
+        "200":
+          description: Товар заблокирован, статус → BLOCKED
+        "404":
+          description: Товар не найден в очереди
+
+  /api/v1/product-blocking-reasons:
+    get:
+      summary: Список причин блокировки
+      tags: [Reference]
+      responses:
+        "200":
+          description: Список причин
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  # Формат — проектируется

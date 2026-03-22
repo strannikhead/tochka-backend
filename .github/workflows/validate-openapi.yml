@@ -1,0 +1,29 @@
+name: Validate OpenAPI
+
+on:
+  pull_request:
+    paths:
+      - "**/*.yaml"
+      - "**/*.yml"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Spectral
+        run: npm install -g @stoplight/spectral-cli
+
+      - name: Validate OpenAPI specs
+        run: |
+          EXIT_CODE=0
+          for file in $(find . -name 'openapi.yaml' -o -name 'schemas.yaml'); do
+            echo "--- Validating $file ---"
+            spectral lint "$file" --ruleset .spectral.yaml || EXIT_CODE=1
+          done
+          exit $EXIT_CODE

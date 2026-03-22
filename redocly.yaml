@@ -1,0 +1,11 @@
+apis:
+  b2b:
+    root: b2b/openapi.yaml
+  b2c-catalog:
+    root: b2c/catalog/openapi.yaml
+  b2c-cart:
+    root: b2c/cart/openapi.yaml
+  b2c-orders:
+    root: b2c/orders/openapi.yaml
+  moderation:
+    root: moderation/openapi.yaml

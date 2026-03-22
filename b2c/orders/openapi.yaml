@@ -1,0 +1,10 @@
+openapi: 3.0.3
+info:
+  title: "NeoMarket B2C: Заказы"
+  version: "0.1"
+  description: |
+    Проектируется синдикатом QA Corps.
+    Домены: оформление заказа, статусы (state machine), отмена, история заказов.
+
+paths: {}
+# Здесь команды QA Corps описывают свои эндпоинты

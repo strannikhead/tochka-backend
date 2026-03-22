@@ -1,0 +1,2349 @@
+openapi: 3.0.3
+info:
+  title: "NeoMarket B2C: Корзина + Избранное + Главная"
+  version: "0.1"
+  description: |
+    Проектируется синдикатом Interface.
+    Домены: корзина (CRUD), избранное, главная страница (баннеры, подборки).
+
+  contact:
+    name: Interface Team
+    email: interface@neomarket.ru
+
+tags:
+  - name: Избранное
+    description: Операции с избранными товарами
+  - name: Корзина
+    description: Операции с корзиной
+  - name: Подборки
+    description: Операции с подборками товаров
+  - name: Подписка
+    description: Подписки на уведомления о товарах
+  - name: Главная — Баннеры
+    description: Баннеры на главной странице и аналитика (показы, клики)
+
+  - name: Рекомендации
+    description: Получение похожих товаров и подборок
+    
+security:
+- BearerAuth: []
+
+paths:
+  # ========== ИЗБРАННОЕ ==========
+  /api/v1/favorites:
+    get:
+      tags:
+        - Избранное
+      summary: Получение списка избранных товаров
+      description: |
+        Возвращает список товаров, добавленных авторизованным пользователем в избранное.
+
+        **Авторизация:** требуется JWT-токен в заголовке `Authorization: Bearer <token>`.
+        Идентификатор пользователя извлекается из токена автоматически.
+
+        **Как это работает:**
+        - Сервис хранит только `product_id` и дату добавления.
+        - Для получения актуальной информации о товарах (названия, цены, наличие, SKU) выполняется batch-запрос к B2B-каталогу.
+        - Товары, которые не найдены в B2B (например, удалены из каталога), **исключаются** из ответа (они автоматически удаляются или игнорируются). Клиент не получает информацию о таких товарах.
+        - Если B2B временно недоступен — возвращается ошибка 503.
+
+        **Пагинация:** поддерживается через параметры `limit` и `offset`.
+        Поле `total` содержит общее количество избранных товаров (только доступных) без учёта пагинации.
+
+        **Пустое избранное:** возвращается `items: []`, `total: 0`.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Максимальное количество элементов в ответе (пагинация)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          required: false
+          description: Смещение для пагинации
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Успешное получение списка избранного
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FavoritesResponse"
+              examples:
+                with_items:
+                  summary: Список с товарами
+                  value:
+                    items:
+                      - product:
+                          id: "550e8400-e29b-41d4-a716-446655440000"
+                          title: "iPhone 15 Pro Max"
+                          description: "Флагман Apple..."
+                          status: "MODERATED"
+                          category:
+                            id: "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+                            name: "Смартфоны"
+                          images:
+                            - url: "/s3/iphone15-1.jpg"
+                              ordering: 0
+                          characteristics:
+                            - name: "Бренд"
+                              value: "Apple"
+                          skus:
+                            - id: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+                              name: "256GB Black"
+                              price: 12999000
+                              active_quantity: 5
+                              characteristics:
+                                - name: "Цвет"
+                                  value: "Чёрный"
+                                - name: "Объём памяти"
+                                  value: "256 ГБ"
+                            - id: "8a4e3f9c-1a2b-4c8d-9e5f-6b7a8c9d0e1f"
+                              name: "256GB White"
+                              price: 12999000
+                              active_quantity: 0
+                        added_at: "2025-03-09T12:00:00Z"
+                    total: 1
+                empty:
+                  summary: Пустое избранное
+                  value:
+                    items: []
+                    total: 0
+        "400":
+          description: Невалидные параметры запроса (например, limit/offset вне диапазона)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "INVALID_PARAMETER"
+                message: "Параметр limit должен быть от 1 до 100"
+        "401":
+          description: Пользователь не авторизован — отсутствует или недействителен JWT-токен
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "UNAUTHORIZED"
+                message: "Требуется авторизация"
+        "503":
+          description: B2B сервис временно недоступен
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "B2B_UNAVAILABLE"
+                message: "Сервис товаров временно недоступен, попробуйте позже"
+
+  /api/v1/favorites/{product_id}:
+    post:
+      tags:
+        - Избранное
+      summary: Добавление товара в избранное
+      description: |
+        Добавляет товар в избранное пользователя.
+        Если товар уже находится в избранном, можно вернуть 200,
+        чтобы операция была безопасной для повторного вызова.
+
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          description: Идентификатор товара (UUID)
+          schema:
+            type: string
+            format: uuid
+            example: "550e8400-e29b-41d4-a716-446655440000"
+        - name: user_id
+          in: query
+          required: true
+          description: Идентификатор пользователя (UUID)
+          schema:
+            type: string
+            format: uuid
+            example: "123e4567-e89b-12d3-a456-426614174000"
+
+      responses:
+        "201":
+          description: Товар успешно добавлен в избранное
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FavoriteMutationResponse"
+              example:
+                product_id: "550e8400-e29b-41d4-a716-446655440000"
+                user_id: "123e4567-e89b-12d3-a456-426614174000"
+                added_at: "2025-03-10T10:00:00Z"
+                message: "Товар добавлен в избранное"
+
+        "200":
+          description: Товар уже был в избранном
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FavoriteMutationResponse"
+              example:
+                product_id: "550e8400-e29b-41d4-a716-446655440000"
+                user_id: "123e4567-e89b-12d3-a456-426614174000"
+                added_at: "2025-03-10T10:00:00Z"
+                message: "Товар уже находится в избранном"
+
+        "400":
+          description: Невалидные параметры запроса
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "INVALID_PARAMETER"
+                message: "Некорректный UUID product_id или user_id"
+
+        "401":
+          description: Пользователь не авторизован
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "UNAUTHORIZED"
+                message: "Требуется авторизация"
+
+        "404":
+          description: Товар не найден
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "PRODUCT_NOT_FOUND"
+                message: "Товар не найден"
+
+        "503":
+          description: B2B сервис временно недоступен
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "B2B_UNAVAILABLE"
+                message: "Сервис товаров временно недоступен, попробуйте позже"
+
+    delete:
+      tags:
+        - Избранное
+      summary: Удаление товара из избранного
+      description: |
+        Удаляет товар из избранного пользователя.
+        Если товара не было в избранном, можно всё равно вернуть 204.
+
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          description: Идентификатор товара (UUID)
+          schema:
+            type: string
+            format: uuid
+            example: "550e8400-e29b-41d4-a716-446655440000"
+        - name: user_id
+          in: query
+          required: true
+          description: Идентификатор пользователя (UUID)
+          schema:
+            type: string
+            format: uuid
+            example: "123e4567-e89b-12d3-a456-426614174000"
+
+      responses:
+        "204":
+          description: Товар успешно удалён из избранного
+
+        "400":
+          description: Невалидные параметры запроса
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "INVALID_PARAMETER"
+                message: "Некорректный UUID product_id или user_id"
+
+        "401":
+          description: Пользователь не авторизован
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "UNAUTHORIZED"
+                message: "Требуется авторизация"
+
+        "404":
+          description: Товар не найден
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "PRODUCT_NOT_FOUND"
+                message: "Товар не найден"
+
+        "503":
+          description: B2B сервис временно недоступен
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "B2B_UNAVAILABLE"
+                message: "Сервис товаров временно недоступен, попробуйте позже"
+
+  /api/v1/favorites/{product_id}/subscribe:
+    post:
+      tags:
+        - Подписка
+      summary: Подписка на уведомления о товаре
+      description: >
+        Создаёт подписку для текущего пользователя на уведомления
+        о появлении товара в наличии (IN_STOCK) или снижении цены (PRICE_DOWN).
+      operationId: subscribeToProduct
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          description: UUID товара из B2B
+          schema:
+            type: string
+            format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubscribeRequest"
+            example:
+              notify_on: ["IN_STOCK", "PRICE_DOWN"]
+      responses:
+        "201":
+          description: Подписка успешно создана
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubscriptionResponse"
+              example:
+                id: "6b9c1f4c-4b7c-4f8a-9a3b-6a8a2f95e2d1"
+                product:
+                  id: "123e4567-e89b-12d3-a456-426614174000"
+                  title: "iPhone 15 Pro Max"
+                  description: "Флагман Apple"
+                  status: "MODERATED"
+                  category:
+                    id: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                    name: "Смартфоны"
+                  images:
+                    - url: "/s3/iphone15-1.jpg"
+                      ordering: 0
+                  characteristics:
+                    - name: "Бренд"
+                      value: "Apple"
+                  skus:
+                    - id: "7e1f5f3c-5e9c-4f1d-bf18-1f8f0a9c1b2c"
+                      name: "256GB Black"
+                      price: 12999000
+                      active_quantity: 5
+                      characteristics:
+                        - name: "Цвет"
+                          value: "Чёрный"
+                        - name: "Объём памяти"
+                          value: "256 ГБ"
+                notify_on: ["IN_STOCK", "PRICE_DOWN"]
+                created_at: "2026-03-09T12:00:00Z"
+        "400":
+          description: Невалидный запрос — пустой или некорректный массив notify_on
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "INVALID_NOTIFY_ON"
+                message: "Должен быть указан хотя бы один тип уведомления"
+        "401":
+          description: Токен отсутствует или невалиден
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "UNAUTHORIZED"
+                message: "Токен отсутствует или невалиден"
+        "404":
+          description: Товар с указанным UUID не найден в Product Service
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "PRODUCT_NOT_FOUND"
+                message: "Товар с указанным идентификатором не найден"
+        "409":
+          description: Подписка на данный товар уже существует
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "SUBSCRIPTION_ALREADY_EXISTS"
+                message: "Вы уже подписаны на уведомления об этом товаре"
+        "500":
+          description: Внутренняя ошибка сервера
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "INTERNAL_SERVER_ERROR"
+                message: "Произошла внутренняя ошибка сервера"
+        "503":
+          description: Product Service (B2B) временно недоступен
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "SERVICE_UNAVAILABLE"
+                message: "Сервис временно недоступен, попробуйте позже"
+
+# ========== КОРЗИНА ==========
+  /api/v1/cart:
+    get:
+      operationId: getCart
+      tags:
+        - Корзина
+      summary: Просмотр корзины с актуальными ценами
+      description: |
+        Возвращает содержимое корзины пользователя или гостевой сессии.
+
+        B2C хранит только `user_id/session_id`, `sku_id`, `quantity`.
+        Данные о товарах, ценах, остатках и доступности обогащаются из B2B.
+
+        Хотя бы один из заголовков `X-User-Id` или `X-Session-Id` должен быть передан.
+
+        Недоступные товары не удаляются из корзины автоматически.
+        Они возвращаются с `available: false` и заполненным `unavailable_reason`.
+
+        Пустая корзина возвращается как `items: []` и нулевой `summary`.
+      parameters:
+        - $ref: "#/components/parameters/XUserId"
+        - $ref: "#/components/parameters/XSessionId"
+      responses:
+        "200":
+          description: Содержимое корзины
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CartResponse"
+              examples:
+                with_items:
+                  summary: Корзина с доступными и недоступными товарами
+                  value:
+                    items:
+                      - item_id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+                        sku_id: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+                        product_id: "550e8400-e29b-41d4-a716-446655440000"
+                        product_title: "iPhone 15 Pro Max"
+                        sku_name: "256GB Black"
+                        image_url: "/s3/iphone15-1.jpg"
+                        unit_price: 12999000
+                        quantity: 1
+                        available_stock: 5
+                        line_total: 12999000
+                        available: true
+                        unavailable_reason: null
+                      - item_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                        sku_id: "8a4e3f9c-1a2b-4c8d-9e5f-6b7a8c9d0e1f"
+                        product_id: "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+                        product_title: "Чехол силиконовый"
+                        sku_name: "Прозрачный"
+                        image_url: "/s3/case-1.jpg"
+                        unit_price: 299000
+                        quantity: 2
+                        available_stock: 2
+                        line_total: 598000
+                        available: true
+                        unavailable_reason: null
+                      - item_id: "b2c3d4e5-f6a7-8901-bcde-f12345678901"
+                        sku_id: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
+                        product_id: "1e2a3b4c-5d6e-7f8a-9b0c-1d2e3f4a5b6c"
+                        product_title: "Кроссовки Nike Air Max"
+                        sku_name: "42 размер"
+                        image_url: "/s3/nike-1.jpg"
+                        unit_price: 899000
+                        quantity: 1
+                        available_stock: 0
+                        line_total: 0
+                        available: false
+                        unavailable_reason: "OUT_OF_STOCK"
+                    summary:
+                      total_amount: 13597000
+                      total_items: 3
+                      total_quantity: 4
+                      available_items: 2
+                      has_unavailable_items: true
+                      checkout_ready: false
+                      currency: "RUB"
+                    checkout_payload:
+                      items:
+                        - product_id: "550e8400-e29b-41d4-a716-446655440000"
+                          sku_id: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+                          quantity: 1
+                          unit_price: 12999000
+                          line_total: 12999000
+                        - product_id: "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+                          sku_id: "8a4e3f9c-1a2b-4c8d-9e5f-6b7a8c9d0e1f"
+                          quantity: 2
+                          unit_price: 299000
+                          line_total: 598000
+                      total_amount: 13597000
+                      currency: "RUB"
+                empty_cart:
+                  summary: Пустая корзина
+                  value:
+                    items: []
+                    summary:
+                      total_amount: 0
+                      total_items: 0
+                      total_quantity: 0
+                      available_items: 0
+                      has_unavailable_items: false
+                      checkout_ready: false
+                      currency: "RUB"
+                    checkout_payload:
+                      items: []
+                      total_amount: 0
+                      currency: "RUB"
+        "400":
+          $ref: "#/components/responses/MissingCartIdentity"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+    delete:
+      operationId: clearCart
+      tags:
+        - Корзина
+      summary: Очистить корзину
+      description: |
+        Удаляет все позиции из корзины пользователя или гостевой сессии.
+
+        Хотя бы один из заголовков `X-User-Id` или `X-Session-Id` должен быть передан.
+      parameters:
+        - $ref: "#/components/parameters/XUserId"
+        - $ref: "#/components/parameters/XSessionId"
+      responses:
+        "204":
+          description: Корзина очищена
+        "400":
+          $ref: "#/components/responses/MissingCartIdentity"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/cart/items:
+    post:
+      operationId: addCartItem
+      tags:
+        - Корзина
+      summary: Добавить товар в корзину
+      description: |
+        Добавляет SKU в корзину пользователя или гостевой сессии.
+
+        Если такой SKU уже есть в корзине, количество существующей позиции увеличивается.
+        Перед сохранением сервис проверяет существование SKU, его доступность
+        и достаточность остатков в B2B.
+
+        Хотя бы один из заголовков `X-User-Id` или `X-Session-Id` должен быть передан.
+      parameters:
+        - $ref: "#/components/parameters/XUserId"
+        - $ref: "#/components/parameters/XSessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddCartItemRequest"
+            example:
+              sku_id: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+              quantity: 1
+      responses:
+        "201":
+          description: Товар добавлен как новая позиция
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CartMutationResponse"
+        "200":
+          description: SKU уже был в корзине, количество увеличено
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CartMutationResponse"
+        "400":
+          description: Невалидный запрос
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                invalid_quantity:
+                  value:
+                    code: "INVALID_QUANTITY"
+                    message: "Количество должно быть не менее 1"
+                missing_identity:
+                  value:
+                    code: "MISSING_CART_IDENTITY"
+                    message: "Передайте X-User-Id или X-Session-Id"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: SKU не найден в B2B
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "SKU_NOT_FOUND"
+                message: "SKU с указанным id не существует"
+        "410":
+          description: Товар заблокирован или снят с продажи
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "SKU_NOT_AVAILABLE"
+                message: "Товар недоступен для покупки"
+        "422":
+          description: Недостаточно остатков на складе
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "INSUFFICIENT_STOCK"
+                message: "Нельзя добавить 3, доступно только 2"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/cart/items/{item_id}:
+    parameters:
+      - $ref: "#/components/parameters/ItemId"
+
+    get:
+      operationId: getCartItem
+      tags:
+        - Корзина
+      summary: Получить позицию корзины по ID
+      description: |
+        Возвращает одну позицию корзины, обогащённую актуальными данными из B2B.
+      parameters:
+        - $ref: "#/components/parameters/XUserId"
+        - $ref: "#/components/parameters/XSessionId"
+      responses:
+        "200":
+          description: Позиция найдена
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CartItem"
+        "400":
+          $ref: "#/components/responses/MissingCartIdentity"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Позиция не найдена
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "CART_ITEM_NOT_FOUND"
+                message: "Позиция не найдена в корзине"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+    put:
+      operationId: updateCartItem
+      tags:
+        - Корзина
+      summary: Изменить количество товара
+      description: |
+        Обновляет количество существующей позиции корзины.
+
+        Проверяет принадлежность позиции текущему пользователю или сессии,
+        доступность SKU и достаточность остатков.
+        Для удаления позиции используется `DELETE`.
+
+        Хотя бы один из заголовков `X-User-Id` или `X-Session-Id` должен быть передан.
+      parameters:
+        - $ref: "#/components/parameters/XUserId"
+        - $ref: "#/components/parameters/XSessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCartItemRequest"
+            example:
+              quantity: 2
+      responses:
+        "200":
+          description: Количество обновлено
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CartMutationResponse"
+        "400":
+          description: Невалидный запрос
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                invalid_quantity:
+                  value:
+                    code: "INVALID_QUANTITY"
+                    message: "Количество должно быть не менее 1"
+                missing_identity:
+                  value:
+                    code: "MISSING_CART_IDENTITY"
+                    message: "Передайте X-User-Id или X-Session-Id"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Попытка изменить чужую позицию
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "ACCESS_DENIED"
+                message: "Нет доступа к этой позиции корзины"
+        "404":
+          description: Позиция не найдена
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "CART_ITEM_NOT_FOUND"
+                message: "Позиция не найдена в корзине"
+        "410":
+          description: Товар заблокирован или снят с продажи
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "PRODUCT_NOT_AVAILABLE"
+                message: "Товар недоступен и не может быть обновлён"
+        "422":
+          description: Недостаточно остатков
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "INSUFFICIENT_STOCK"
+                message: "Нельзя установить 10, доступно только 5"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+    delete:
+      operationId: deleteCartItem
+      tags:
+        - Корзина
+      summary: Удалить позицию из корзины
+      description: |
+        Удаляет одну позицию из корзины пользователя или гостевой сессии.
+      parameters:
+        - $ref: "#/components/parameters/XUserId"
+        - $ref: "#/components/parameters/XSessionId"
+      responses:
+        "204":
+          description: Позиция удалена
+        "400":
+          $ref: "#/components/responses/MissingCartIdentity"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Позиция не найдена
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "CART_ITEM_NOT_FOUND"
+                message: "Позиция не найдена в корзине"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /cart/validate:
+    get:
+      summary: Валидация корзины
+      description: |
+        Проверяет доступность товаров в корзине покупателя.
+        
+        **Когда вызывается:**
+        - Перед переходом к оформлению заказа (кнопка "Оформить заказ")
+        - Периодически при длительном нахождении на странице корзины
+        - После возврата пользователя к корзине через некоторое время
+        - После изменения количества товара в корзине (для проверки конкретной позиции)
+        
+        **Что проверяется:**
+        - Товар не удален
+        - Товар не заблокирован модератором
+        - Товар есть в наличии
+        - Запрошенное количество не превышает доступное
+        
+        **Идентификация корзины:**
+        Корзина пользователя определяется на основе `user_id` из JWT-токена.
+        Гостевая корзина не поддерживается — требуется авторизация.
+      operationId: validateCart
+      tags:
+        - Корзина
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: cart_item_ids
+          in: query
+          description: |
+            Список идентификаторов позиций для выборочной проверки.
+            Если параметр не указан, проверяется вся корзина.
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+          example: ["ci_001", "ci_003"]
+      responses:
+        '200':
+          description: |
+            Валидация выполнена успешно.
+            Возвращается всегда, даже если корзина невалидна.
+            Результат валидации содержится в теле ответа.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartValidationResponse'
+              examples:
+                valid_cart:
+                  summary: Валидная корзина
+                  value:
+                    is_valid: true
+                    can_checkout: true
+                    total_items: 3
+                    validation_timestamp: "2026-01-15T14:30:00Z"
+                    issues: []
+
+                invalid_cart:
+                  summary: Проблемы с товарами в корзине
+                  value:
+                    is_valid: false
+                    can_checkout: false
+                    total_items: 4
+                    validation_timestamp: "2026-01-15T14:30:00Z"
+                    issues:
+                      - cart_item_id: "ci_001"
+                        sku_id: 101
+                        issue_type: "BLOCKED"
+                        severity: "critical"
+                        message: "Товар заблокирован модератором и недоступен для покупки"
+                        details:
+                          product_id: 42
+                          product_title: "iPhone 15 Pro Max"
+                          sku_name: "256GB Black"
+                          current_status: "BLOCKED"
+                      - cart_item_id: "ci_002"
+                        sku_id: 102
+                        issue_type: "OUT_OF_STOCK"
+                        severity: "critical"
+                        message: "Товар отсутствует в наличии"
+                        details:
+                          product_id: 42
+                          product_title: "iPhone 15 Pro Max"
+                          sku_name: "256GB White"
+                          requested_quantity: 2
+                          available_quantity: 0
+                      - cart_item_id: "ci_003"
+                        sku_id: 103
+                        issue_type: "INSUFFICIENT_STOCK"
+                        severity: "warning"
+                        message: "Доступно меньше товара, чем в корзине"
+                        details:
+                          product_id: 43
+                          product_title: "Чехол силиконовый"
+                          sku_name: "Чёрный"
+                          requested_quantity: 5
+                          available_quantity: 2
+                      - cart_item_id: "ci_004"
+                        sku_id: 999
+                        issue_type: "DELETED"
+                        severity: "critical"
+                        message: "Товар удалён продавцом"
+                        details:
+                          product_id: null
+                          product_title: null
+                          sku_name: null
+                
+                empty_cart:
+                  summary: Пустая корзина
+                  value:
+                    is_valid: true
+                    can_checkout: false
+                    total_items: 0
+                    validation_timestamp: "2026-01-15T14:30:00Z"
+                    issues: []
+        
+        '400':
+          description: Ошибка в параметрах запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalid_format:
+                  summary: Неверный формат
+                  value:
+                    code: "INVALID_PARAMETER"
+                    message: "Неверный формат параметра cart_item_ids. Ожидается массив строк."
+                items_not_found:
+                  summary: ID не найдены
+                  value:
+                    code: "CART_ITEMS_NOT_FOUND"
+                    message: "Указанные позиции не найдены: ci_999"
+                cart_empty:
+                  summary: Корзина пуста
+                  value:
+                    code: "CART_EMPTY"
+                    message: "Корзина пуста"
+        
+        '401':
+          description: Пользователь не авторизован
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: "UNAUTHORIZED"
+                message: "Требуется авторизация"
+        
+        '502':
+          description: |
+            B2B сервис вернул некорректный ответ (Bad Gateway).
+            Например, ответ не соответствует ожидаемой схеме.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: "B2B_BAD_GATEWAY"
+                message: "Сервис каталога вернул некорректный ответ"
+        
+        '503':
+          description: |
+            Сервис B2B временно недоступен.
+            Невозможно провести валидацию корзины.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: "B2B_SERVICE_UNAVAILABLE"
+                message: "Сервис каталога временно недоступен. Попробуйте позже"
+        
+        '504':
+          description: |
+            Таймаут при обращении к B2B сервису (Gateway Timeout).
+            B2B не ответил в течение ожидаемого времени.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: "B2B_GATEWAY_TIMEOUT"
+                message: "Сервис каталога не ответил вовремя. Попробуйте позже"
+
+  # ========== ГЛАВНАЯ — БАННЕРЫ (Блок И, команда Изи 90) ==========
+  /api/v1/home/banners:
+    get:
+      tags:
+        - Главная — Баннеры
+      summary: Получить активные баннеры
+      description: |
+        Возвращает список баннеров для главной страницы.
+
+        Фильтрация на стороне сервера:
+        - is_active = true
+        - now() между start_at и end_at
+        - placement = "home"
+
+        Результат отсортирован по priority (меньше значение = выше в слайдере).
+
+        Пагинация не предусмотрена — баннеров на главной обычно не более 10–15.
+        Ответ можно кэшировать (Redis / CDN), т.к. баннеры меняются редко.
+      operationId: getHomeBanners
+      responses:
+        "200":
+          description: Список активных баннеров (может быть пустым)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BannerListResponse"
+              example:
+                items:
+                  - id: "550e8400-e29b-41d4-a716-446655440000"
+                    title: "Скидки на электронику до -30%"
+                    image_url: "/cdn/banners/electronics-sale.jpg"
+                    link: "/catalog?category_id=3"
+                    priority: 10
+                  - id: "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+                    title: "Новинки сезона"
+                    image_url: "/cdn/banners/new-arrivals.jpg"
+                    link: "/collections/5"
+                    priority: 20
+                total_count: 2
+        "500":
+          description: Внутренняя ошибка сервера
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "INTERNAL_ERROR"
+                message: "Не удалось загрузить баннеры"
+
+  /api/v1/banner-events:
+    post:
+      tags:
+        - Главная — Баннеры
+      summary: Отправить событие аналитики баннера
+      description: |
+        Принимает события показов (impression) и кликов (click).
+
+        Поддерживает батч-отправку: фронт может отправить несколько
+        impression-событий за один запрос (например, все баннеры
+        в слайдере, которые показались пользователю).
+
+        user_id берётся из токена авторизации (заголовок Authorization),
+        но эндпоинт работает и для неавторизованных пользователей —
+        в этом случае user_id = null.
+
+        На основе собранных событий считается CTR = clicks / impressions,
+        что позволяет маркетингу оценивать эффективность баннеров.
+      operationId: postBannerEvents
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BannerEventsRequest"
+            examples:
+              single_click:
+                summary: Один клик по баннеру
+                value:
+                  events:
+                    - banner_id: "550e8400-e29b-41d4-a716-446655440000"
+                      event: "click"
+                      timestamp: "2025-06-15T14:32:10Z"
+              batch_impressions:
+                summary: Батч показов (слайдер загрузился)
+                value:
+                  events:
+                    - banner_id: "550e8400-e29b-41d4-a716-446655440000"
+                      event: "impression"
+                      timestamp: "2025-06-15T14:32:00Z"
+                    - banner_id: "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+                      event: "impression"
+                      timestamp: "2025-06-15T14:32:00Z"
+                    - banner_id: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+                      event: "impression"
+                      timestamp: "2025-06-15T14:32:00Z"
+      responses:
+        "204":
+          description: События приняты, тело ответа отсутствует
+        "400":
+          description: Невалидные данные
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                empty_events:
+                  summary: Пустой массив событий
+                  value:
+                    code: "EMPTY_EVENTS"
+                    message: "Массив events не может быть пустым"
+                invalid_event_type:
+                  summary: Неизвестный тип события
+                  value:
+                    code: "INVALID_EVENT_TYPE"
+                    message: "Допустимые значения event: impression, click"
+                invalid_banner_id:
+                  summary: Несуществующий баннер
+                  value:
+                    code: "BANNER_NOT_FOUND"
+                    message: "Баннер с указанным id не найден"
+        "500":
+          description: Внутренняя ошибка сервера
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ========== ПОДБОРКИ ==========
+  /api/v1/collections/{collection_id}/products:
+    get:
+      tags:
+        - Подборки
+      summary: Получение списка товаров из подборки
+      description: |
+        Возвращает список товаров, входящих в конкретную подборку
+        (например "Хиты продаж").
+
+        Сервис хранит идентификаторы товаров в подборке и обращается
+        к B2B каталогу товаров для получения актуальной информации.
+
+        Если B2B сервис недоступен — возвращается ошибка 503.
+
+        Товары, отсутствующие в каталоге B2B, исключаются из списка
+        `items`, а их идентификаторы возвращаются в `unavailable_ids`.
+
+      parameters:
+        - name: collection_id
+          in: path
+          required: true
+          description: Идентификатор подборки
+          schema:
+            type: string
+            example: "col-002"
+
+        - name: limit
+          in: query
+          required: false
+          description: Максимальное количество товаров в ответе
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+
+        - name: offset
+          in: query
+          required: false
+          description: Смещение для пагинации
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+
+      responses:
+        "200":
+          description: Успешное получение списка товаров подборки
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CollectionProductsResponse"
+
+        "400":
+          description: Невалидные параметры запроса
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+        "404":
+          description: Подборка не найдена
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+        "503":
+          description: B2B сервис временно недоступен
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/cart/also_bought:
+    get:
+      tags:
+        - Корзина
+      summary: Получить рекомендации "покупают вместе"
+      description: |
+        Возвращает список товаров, которые покупали другие пользователи,
+        у которых в корзине были те же товары, что и у текущего пользователя.
+
+        Корзина определяется по пользователю из JWT токена.
+
+        Если рекомендации отсутствуют, возвращается пустой массив.
+
+      parameters:
+        - in: query
+          name: limit
+          required: false
+          description: Максимальное количество возвращаемых рекомендаций
+          schema:
+            type: integer
+            default: 10
+            maximum: 50
+            minimum: 1
+
+      responses:
+        "200":
+          description: Рекомендации успешно получены
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlsoBoughtResponse"
+              example:
+                recommended_product_ids:
+                  - "550e8400-e29b-41d4-a716-446655440000"
+                  - "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
+                  - "6fa459ea-ee8a-3ca4-894e-db77e160355e"
+
+        "401":
+          description: Пользователь не авторизован или JWT недействителен
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: UNAUTHORIZED
+                message: Invalid or missing JWT token
+
+        "409":
+          description: Корзина пуста — невозможно построить рекомендации
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: EMPTY_CART
+                message: Cannot generate recommendations for empty cart
+
+        "500":
+          description: Внутренняя ошибка сервера
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: INTERNAL_ERROR
+                message: Unexpected server error
+
+        "503":
+          description: B2B сервис товаров временно недоступен
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: B2B_UNAVAILABLE
+                message: Product service temporarily unavailable
+
+  /api/v1/products/{id}/similar:
+    get:
+      tags:
+        - Рекомендации
+      summary: Получить похожие товары
+      description: |
+        Возвращает массив товаров, алгоритмически похожих на исходный.
+          никогда не возвращается в списке рекомендаций.
+      operationId: getSimilarProducts
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Уникальный идентификатор (UUID) исходного товара.
+          schema:
+            type: string
+            format: uuid
+            example: "123e4567-e89b-12d3-a456-426614174000"
+        - name: limit
+          in: query
+          required: false
+          description: Ограничение на количество возвращаемых товаров.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+      responses:
+        '200':
+          description: Успешный ответ. Возвращает массив товаров.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimilarProductsResponse'
+        '400':
+          description: Невалидный запрос
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Исходный товар не найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Product Service (B2B) временно недоступен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504':
+          description: Таймаут ответа B2B
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ========== ПОДБОРКИ ==========
+  /api/v1/main/collections:
+    get:
+      tags:
+        - Подборки
+      summary: Получить список подборок
+      description: >
+        Возвращает список тематических подборок для витрины главной страницы.
+        Сервис автоматически фильтрует неактивные записи и сортирует результат
+        по полю `priority`.
+      operationId: getCollections
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Количество подборок для возврата.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+        - name: offset
+          in: query
+          required: false
+          description: Смещение для пагинации.
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Успешный возврат списка подборок.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CollectionsResponse'
+              example:
+                metadata:
+                  total_count: 42
+                  limit: 10
+                  offset: 0
+                collections:
+                  - id: "550e8400-e29b-41d4-a716-446655440000"
+                    title: "Новогодние скидки"
+                    description: "Успейте купить подарки до праздников"
+                    cover_image_url: "https://cdn.neomarket.ru/collections/holiday.jpg"
+                    target_url: "/collections/holiday-sale"
+                    priority: 100
+                    start_date: "2024-12-20"
+        '400':
+          description: Невалидные параметры запроса.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Внутренняя ошибка сервера.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+                
+components:
+    
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        JWT передаётся в заголовке Authorization: Bearer <token>.
+        API Gateway проверяет подпись токена, извлекает userId
+        и передаёт его в Cart Service через внутренний заголовок X-User-Id.
+        Клиент не передаёт X-User-Id напрямую.
+  parameters:
+    XUserId:
+      name: X-User-Id
+      in: header
+      required: false
+      description: UUID покупателя. Передаётся после аутентификации.
+      schema:
+        type: string
+        format: uuid
+        example: "123e4567-e89b-12d3-a456-426614174000"
+
+    XSessionId:
+      name: X-Session-Id
+      in: header
+      required: false
+      description: Идентификатор гостевой сессии. Используется для неавторизованной корзины.
+      schema:
+        type: string
+        example: "sess-7f3d82ab-14bc-4d11-a902-31d29d9189af"
+
+    ItemId:
+      name: item_id
+      in: path
+      required: true
+      description: ID позиции в корзине
+      schema:
+        type: string
+        format: uuid
+        example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+
+  responses:
+    MissingCartIdentity:
+      description: Не передан ни X-User-Id, ни X-Session-Id
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: "MISSING_CART_IDENTITY"
+            message: "Передайте X-User-Id или X-Session-Id"
+
+    Unauthorized:
+      description: Пользователь не авторизован или X-User-Id невалиден
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: "UNAUTHORIZED"
+            message: "Missing or invalid X-User-Id"
+
+    ServiceUnavailable:
+      description: B2B / Product Service временно недоступен
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: "SERVICE_UNAVAILABLE"
+            message: "Сервис временно недоступен, попробуйте позже"
+
+    InternalServerError:
+      description: Внутренняя ошибка сервиса корзины
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: "INTERNAL_ERROR"
+            message: "Unexpected server error"
+
+  schemas:
+    # ----- СХЕМЫ ДЛЯ ИЗБРАННОГО -----
+    Category:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+        name:
+          type: string
+          example: "Смартфоны"
+      required:
+        - id
+        - name
+
+    Image:
+      type: object
+      properties:
+        url:
+          type: string
+          example: "/s3/iphone15-1.jpg"
+        ordering:
+          type: integer
+          example: 0
+      required:
+        - url
+        - ordering
+
+    Characteristic:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "Бренд"
+        value:
+          type: string
+          example: "Apple"
+      required:
+        - name
+        - value
+
+    SKU:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+        name:
+          type: string
+          example: "256GB Black"
+        price:
+          type: integer
+          description: Цена в копейках
+          example: 12999000
+        active_quantity:
+          type: integer
+          description: Доступное количество на складе
+          example: 5
+        characteristics:
+          type: array
+          items:
+            $ref: "#/components/schemas/Characteristic"
+      required:
+        - id
+        - name
+        - price
+        - active_quantity
+
+    Product:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        title:
+          type: string
+          example: "iPhone 15 Pro Max"
+        description:
+          type: string
+          example: "Флагман Apple..."
+        status:
+          type: string
+          enum: [CREATED, ON_MODERATION, MODERATED, BLOCKED]
+          example: "MODERATED"
+        category:
+          $ref: "#/components/schemas/Category"
+        images:
+          type: array
+          items:
+            $ref: "#/components/schemas/Image"
+        characteristics:
+          type: array
+          items:
+            $ref: "#/components/schemas/Characteristic"
+        skus:
+          type: array
+          items:
+            $ref: "#/components/schemas/SKU"
+      required:
+        - id
+        - title
+        - description
+        - status
+        - category
+        - images
+        - characteristics
+        - skus
+
+    FavoriteItem:
+      type: object
+      properties:
+        product:
+          $ref: "#/components/schemas/Product"
+        added_at:
+          type: string
+          format: date-time
+          description: Дата и время добавления товара в избранное
+          example: "2025-03-09T12:00:00Z"
+      required:
+        - product
+        - added_at
+
+    FavoritesResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          description: Список избранных товаров (обогащённых данными из B2B)
+          items:
+            $ref: "#/components/schemas/FavoriteItem"
+        total:
+          type: integer
+          description: Общее количество товаров в избранном (без учёта пагинации)
+          example: 5
+      required:
+        - items
+        - total
+
+    FavoriteMutationResponse:
+      type: object
+      properties:
+        product_id:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        user_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        added_at:
+          type: string
+          format: date-time
+          example: "2025-03-10T10:00:00Z"
+        message:
+          type: string
+          example: "Товар добавлен в избранное"
+      required:
+        - product_id
+        - user_id
+        - added_at
+        - message
+
+    SubscribeRequest:
+      type: object
+      required:
+        - notify_on
+      properties:
+        notify_on:
+          type: array
+          description: >
+            Список событий, на которые хочет подписаться пользователь.
+            IN_STOCK — уведомление о появлении товара в наличии.
+            PRICE_DOWN — уведомление о снижении цены.
+          items:
+            type: string
+            enum: [IN_STOCK, PRICE_DOWN]
+          minItems: 1
+          example: ["IN_STOCK", "PRICE_DOWN"]
+
+    SubscriptionResponse:
+      type: object
+      description: Подписка пользователя на уведомления о товаре
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: UUID подписки
+          example: "6b9c1f4c-4b7c-4f8a-9a3b-6a8a2f95e2d1"
+        product:
+          $ref: "#/components/schemas/Product"
+        notify_on:
+          type: array
+          description: События, на которые подписан пользователь
+          items:
+            type: string
+            enum: [IN_STOCK, PRICE_DOWN]
+          example: ["IN_STOCK", "PRICE_DOWN"]
+        created_at:
+          type: string
+          format: date-time
+          description: Дата создания подписки
+          example: "2026-03-09T12:00:00Z"
+
+    # ----- СХЕМЫ ДЛЯ КОРЗИНЫ -----
+
+    AddCartItemRequest:
+      type: object
+      required:
+        - sku_id
+        - quantity
+      properties:
+        sku_id:
+          type: string
+          format: uuid
+          description: Идентификатор SKU
+          example: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+        quantity:
+          type: integer
+          minimum: 1
+          description: Количество единиц товара
+          example: 1
+
+    UpdateCartItemRequest:
+      type: object
+      required:
+        - quantity
+      properties:
+        quantity:
+          type: integer
+          minimum: 1
+          description: Новое количество товара
+          example: 2
+
+    CartItem:
+      type: object
+      description: Позиция корзины, обогащённая данными из B2B
+      required:
+        - item_id
+        - sku_id
+        - product_id
+        - product_title
+        - sku_name
+        - unit_price
+        - quantity
+        - available_stock
+        - line_total
+        - available
+      properties:
+        item_id:
+          type: string
+          format: uuid
+          description: ID позиции в корзине
+          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        sku_id:
+          type: string
+          format: uuid
+          description: ID варианта товара (SKU)
+          example: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+        product_id:
+          type: string
+          format: uuid
+          description: ID товара
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        product_title:
+          type: string
+          description: Название товара
+          example: "iPhone 15 Pro Max"
+        sku_name:
+          type: string
+          description: Название варианта
+          example: "256GB Black"
+        image_url:
+          type: string
+          nullable: true
+          description: URL изображения SKU
+          example: "/s3/iphone15-1.jpg"
+        unit_price:
+          type: integer
+          description: Актуальная цена за единицу в копейках
+          example: 12999000
+        quantity:
+          type: integer
+          minimum: 1
+          description: Количество в корзине
+          example: 1
+        available_stock:
+          type: integer
+          minimum: 0
+          description: Текущий остаток на складе
+          example: 5
+        line_total:
+          type: integer
+          description: Сумма по позиции = unit_price × quantity. Для недоступного товара может быть 0
+          example: 12999000
+        available:
+          type: boolean
+          description: Доступен ли товар для покупки
+          example: true
+        unavailable_reason:
+          type: string
+          nullable: true
+          description: |
+            Причина недоступности. `null`, если товар доступен.
+            Возможные значения: OUT_OF_STOCK, PRODUCT_BLOCKED,
+            PRODUCT_DELISTED, SKU_DISABLED.
+          enum:
+            - OUT_OF_STOCK
+            - PRODUCT_BLOCKED
+            - PRODUCT_DELISTED
+            - SKU_DISABLED
+            - null 
+          example: null
+
+    CartSummary:
+      type: object
+      description: Итоги по корзине
+      required:
+        - total_amount
+        - total_items
+        - total_quantity
+        - available_items
+        - has_unavailable_items
+        - checkout_ready
+        - currency
+      properties:
+        total_amount:
+          type: integer
+          description: Сумма по доступным товарам в копейках
+          example: 13597000
+        total_items:
+          type: integer
+          description: Количество уникальных позиций в корзине
+          example: 3
+        total_quantity:
+          type: integer
+          description: Суммарное количество единиц товара в корзине
+          example: 4
+        available_items:
+          type: integer
+          description: Количество доступных позиций
+          example: 2
+        has_unavailable_items:
+          type: boolean
+          description: Есть ли в корзине недоступные позиции
+          example: true
+        checkout_ready:
+          type: boolean
+          description: Можно ли переходить к оформлению заказа
+          example: false
+        currency:
+          type: string
+          description: Валюта корзины
+          example: "RUB"
+
+    CheckoutItem:
+      type: object
+      required:
+        - product_id
+        - sku_id
+        - quantity
+        - unit_price
+        - line_total
+      properties:
+        product_id:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        sku_id:
+          type: string
+          format: uuid
+          example: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+        quantity:
+          type: integer
+          example: 2
+        unit_price:
+          type: integer
+          example: 12999000
+        line_total:
+          type: integer
+          example: 25998000
+
+    CheckoutPayload:
+      type: object
+      description: Данные для следующего блока оформления заказа
+      required:
+        - items
+        - total_amount
+        - currency
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CheckoutItem"
+        total_amount:
+          type: integer
+          example: 13597000
+        currency:
+          type: string
+          example: "RUB"
+
+    CartResponse:
+      type: object
+      required:
+        - items
+        - summary
+        - checkout_payload
+      properties:
+        items:
+          type: array
+          description: Список позиций корзины, обогащённых данными из B2B
+          items:
+            $ref: "#/components/schemas/CartItem"
+        summary:
+          $ref: "#/components/schemas/CartSummary"
+        checkout_payload:
+          $ref: "#/components/schemas/CheckoutPayload"
+
+    CartMutationResponse:
+      type: object
+      description: Ответ после добавления товара или изменения количества
+      required:
+        - message
+        - item
+        - summary
+      properties:
+        message:
+          type: string
+          example: "Позиция корзины успешно обновлена"
+        item:
+          $ref: "#/components/schemas/CartItem"
+        summary:
+          $ref: "#/components/schemas/CartSummary"
+
+    # ----- СХЕМЫ ВАЛИДАЦИИ КОРЗИНЫ -----          
+    CartValidationResponse:
+      type: object
+      required:
+        - is_valid
+        - can_checkout
+        - total_items
+        - validation_timestamp
+        - issues
+      properties:
+        is_valid:
+          type: boolean
+          description: |
+            true - все товары доступны и валидны (нет ни одной проблемы)
+            false - есть хотя бы одна проблема (см. массив issues)
+          example: false
+        
+        can_checkout:
+          type: boolean
+          description: |
+            Можно ли оформить заказ.
+            false если:
+            - Корзина пуста (total_items = 0)
+            - Есть хотя бы один issue с severity = "critical"
+            
+            true если:
+            - Есть товары И нет критичных проблем
+            - Могут быть проблемы с severity = "warning"
+          example: false
+        
+        total_items:
+          type: integer
+          minimum: 0
+          description: Общее количество проверенных позиций
+          example: 4
+        
+        validation_timestamp:
+          type: string
+          format: date-time
+          description: Время проведения валидации (ISO 8601)
+          example: "2026-01-15T14:30:00Z"
+        
+        issues:
+          type: array
+          description: |
+            Массив проблем с товарами.
+            Пустой массив если все товары валидны.
+          items:
+            $ref: '#/components/schemas/CartValidationIssue'
+
+    CartValidationIssue:
+      type: object
+      required:
+        - cart_item_id
+        - sku_id
+        - issue_type
+        - severity
+        - message
+        - details
+      properties:
+        cart_item_id:
+          type: string
+          description: Уникальный идентификатор позиции в корзине
+          example: "ci_001"
+        
+        sku_id:
+          type: integer
+          description: ID SKU из системы B2B
+          example: 101
+        
+        issue_type:
+          type: string
+          enum:
+            - BLOCKED
+            - DELETED
+            - OUT_OF_STOCK
+            - INSUFFICIENT_STOCK
+            - ON_MODERATION
+            - VALIDATION_ERROR
+          description: |
+            Тип проблемы:
+            - BLOCKED - товар заблокирован модератором (status = BLOCKED в B2B)
+            - DELETED - SKU или Product удалён (404 от B2B)
+            - OUT_OF_STOCK - товар отсутствует в наличии (activeQuantity = 0)
+            - INSUFFICIENT_STOCK - доступно меньше, чем запрошено (activeQuantity < requested)
+            - ON_MODERATION - товар на модерации (status = ON_MODERATION в B2B)
+            - VALIDATION_ERROR - ошибка при проверке (например, 500 от B2B)
+          example: "BLOCKED"
+        
+        severity:
+          type: string
+          enum:
+            - critical
+            - warning
+          description: |
+            Критичность проблемы:
+            - critical - блокирует оформление заказа (can_checkout = false)
+            - warning - не блокирует оформление, но требует внимания пользователя
+            
+            Соответствие issue_type → severity:
+            - BLOCKED → critical
+            - DELETED → critical
+            - OUT_OF_STOCK → critical
+            - VALIDATION_ERROR → critical
+            - INSUFFICIENT_STOCK → warning
+            - ON_MODERATION → warning
+          example: "critical"
+        
+        message:
+          type: string
+          description: Человекочитаемое описание проблемы для отображения пользователю
+          example: "Товар заблокирован модератором и недоступен для покупки"
+        
+        details:
+          type: object
+          description: Дополнительные данные о проблеме (структура зависит от issue_type)
+          properties:
+            product_id:
+              type: integer
+              nullable: true
+              description: ID товара из B2B (null если товар удалён)
+              example: 42
+            
+            product_title:
+              type: string
+              nullable: true
+              description: Название товара (null если товар удалён)
+              example: "iPhone 15 Pro Max"
+            
+            sku_name:
+              type: string
+              nullable: true
+              description: Название варианта SKU (null если товар удалён)
+              example: "256GB Black"
+            
+            requested_quantity:
+              type: integer
+              description: |
+                Количество в корзине.
+                Присутствует для issue_type = OUT_OF_STOCK, INSUFFICIENT_STOCK
+              example: 2
+            
+            available_quantity:
+              type: integer
+              description: |
+                Доступное количество (из B2B).
+                Присутствует для issue_type = OUT_OF_STOCK, INSUFFICIENT_STOCK
+              example: 0
+            
+            current_status:
+              type: string
+              enum:
+                - CREATED
+                - ON_MODERATION
+                - MODERATED
+                - BLOCKED
+              description: |
+                Текущий статус товара в B2B.
+                Присутствует для issue_type = BLOCKED, ON_MODERATION
+              example: "BLOCKED"
+            
+            error:
+              type: string
+              description: |
+                Описание технической ошибки.
+                Присутствует для issue_type = VALIDATION_ERROR
+              example: "B2B service returned 500"
+            
+    # ----- СХЕМЫ ДЛЯ БАННЕРОВ (Блок И, команда Изи 90) -----
+    BannerListResponse:
+      type: object
+      required:
+        - items
+        - total_count
+      properties:
+        items:
+          type: array
+          description: Список активных баннеров, отсортированных по priority
+          items:
+            $ref: "#/components/schemas/Banner"
+        total_count:
+          type: integer
+          description: Общее количество возвращённых баннеров
+          example: 3
+
+    Banner:
+      type: object
+      required:
+        - id
+        - title
+        - image_url
+        - link
+        - priority
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Уникальный идентификатор баннера
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        title:
+          type: string
+          description: Заголовок баннера (для alt-текста и accessibility)
+          example: "Скидки на электронику до -30%"
+        image_url:
+          type: string
+          description: URL изображения баннера
+          example: "/cdn/banners/electronics-sale.jpg"
+        link:
+          type: string
+          description: |
+            Внутренний URL перехода при клике.
+            Примеры: /catalog?category_id=3, /products/42, /collections/1
+          example: "/catalog?category_id=3"
+        priority:
+          type: integer
+          description: |
+            Приоритет отображения (меньше значение = выше в слайдере).
+            Консистентно с полем priority в подборках (блок К).
+          example: 10
+
+    BannerEventsRequest:
+      type: object
+      required:
+        - events
+      properties:
+        events:
+          type: array
+          description: |
+            Массив событий. Поддерживает батч-отправку —
+            несколько событий за один запрос.
+          minItems: 1
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/BannerEvent"
+
+    BannerEvent:
+      type: object
+      required:
+        - banner_id
+        - event
+        - timestamp
+      properties:
+        banner_id:
+          type: string
+          format: uuid
+          description: ID баннера, к которому относится событие
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        event:
+          type: string
+          enum:
+            - impression
+            - click
+          description: |
+            Тип события:
+            - impression — баннер показан пользователю
+            - click — пользователь нажал на баннер
+          example: "click"
+        timestamp:
+          type: string
+          format: date-time
+          description: |
+            Время события на клиенте (ISO 8601, UTC).
+            Нужен для точного расчёта CTR по временным интервалам.
+          example: "2025-06-15T14:32:10Z"
+
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+          description: "Код ошибки"
+          example: "OUT_OF_STOCK"
+        message:
+          type: string
+          description: "Описание ошибки"
+          example: "Товара больше нет в наличии"
+        details:
+          type: object
+          nullable: true
+          description: "Дополнительные детали ошибки"
+
+    ErrorResponse:
+      type: object
+      properties:
+        code:
+          type: string
+          description: "Код ошибки"
+          example: "UNAUTHORIZED"
+        message:
+          type: string
+          description: "Описание ошибки"
+          example: "Требуется авторизация"
+      required:
+        - code
+        - message
+
+    # ----- СХЕМЫ ДЛЯ ПОДБОРОК продуктов -----
+    CollectionProductsResponse:
+      type: object
+      properties:
+        collection_title:
+          type: string
+          description: Название подборки
+          example: "Хиты продаж"
+
+        total_products:
+          type: integer
+          description: Общее количество товаров в подборке
+          example: 134
+
+        items:
+          type: array
+          description: Список товаров из подборки
+          items:
+            $ref: "#/components/schemas/Product"
+
+        unavailable_ids:
+          type: array
+          description: ID товаров, которые не удалось получить из B2B
+          items:
+            type: integer
+          example:
+            - 999
+            - 1001
+
+      required:
+        - collection_title
+        - total_products
+        - items
+
+    AlsoBoughtResponse:
+      type: object
+      required:
+        - recommended_product_ids
+      properties:
+        recommended_product_ids:
+          type: array
+          description: Список товаров, которые часто покупают вместе с товарами из корзины пользователя
+          items:
+            type: string
+            format: uuid
+          example:
+            - "550e8400-e29b-41d4-a716-446655440000"
+            - "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
+            - "6fa459ea-ee8a-3ca4-894e-db77e160355e"
+
+    SimilarProductsResponse:
+      type: object
+      description: Ответ с массивом похожих товаров
+      properties:
+        items:
+          type: array
+          description: Список рекомендованных товаров
+          items:
+            $ref: "#/components/schemas/Product"
+        total:
+          type: integer
+          description: Общее количество
+          example: 5
+      required:
+        - items
+        - total
+
+    # ----- СХЕМЫ ДЛЯ ПОДБОРОК -----
+    Collection:
+      type: object
+      required:
+        - id
+        - title
+        - cover_image_url
+        - target_url
+        - priority
+        - start_date
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        title:
+          type: string
+          example: "Новогодние скидки"
+        description:
+          type: string
+          example: "Успейте купить подарки до праздников"
+        cover_image_url:
+          type: string
+          format: uri
+          description: |
+            URL изображения-обложки. Может быть как относительным путем (начинается с /), 
+            так и абсолютным URL. Клиент должен корректно обрабатывать оба варианта.
+          example: "https://cdn.neomarket.ru/collections/hits.jpg"
+        target_url:
+          type: string
+          description: "Внутренняя ссылка для перехода к списку товаров данной подборки"
+          example: "/collections/holiday-sale"
+        priority:
+          type: integer
+          example: 100
+        start_date:
+          type: string
+          format: date
+          description: "Дата начала показа подборки. До наступления этой даты подборка скрыта на главной странице."
+          example: "2024-12-20"
+
+    CollectionsResponse:
+      type: object
+      required:
+        - metadata
+        - collections
+      properties:
+        metadata:
+          type: object
+          required:
+            - total_count
+            - limit
+            - offset
+          properties:
+            total_count:
+              type: integer
+              example: 42
+            limit:
+              type: integer
+              example: 10
+            offset:
+              type: integer
+              example: 0
+        collections:
+          type: array
+          items:
+            $ref: '#/components/schemas/Collection'

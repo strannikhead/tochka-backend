@@ -1,0 +1,107 @@
+openapi: 3.0.3
+info:
+  title: NeoMarket Shared Schemas
+  version: "1.0"
+  description: Общие типы данных, переиспользуемые между модулями
+
+paths: {}
+
+components:
+  schemas:
+    Product:
+      type: object
+      description: Карточка товара
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          $ref: "#/components/schemas/ProductStatus"
+        category:
+          $ref: "#/components/schemas/CategoryRef"
+        images:
+          type: array
+          items:
+            $ref: "#/components/schemas/Image"
+        characteristics:
+          type: array
+          items:
+            $ref: "#/components/schemas/CharacteristicValue"
+        skus:
+          type: array
+          items:
+            $ref: "#/components/schemas/SKU"
+
+    ProductStatus:
+      type: string
+      enum:
+        - CREATED
+        - ON_MODERATION
+        - MODERATED
+        - BLOCKED
+      description: |
+        CREATED → ON_MODERATION → MODERATED (опубликован)
+        ON_MODERATION → BLOCKED (модератор отклонил)
+
+    SKU:
+      type: object
+      description: |
+        Конкретный вариант товара для продажи.
+        iPhone 256GB Black = один SKU, iPhone 256GB White = другой.
+        У каждого SKU своя цена, артикул, остаток.
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+          example: "256GB Black"
+        price:
+          type: integer
+          description: Цена в копейках
+          example: 12999000
+        activeQuantity:
+          type: integer
+          description: Остаток на складе
+          example: 5
+        characteristics:
+          type: array
+          items:
+            $ref: "#/components/schemas/CharacteristicValue"
+
+    CategoryRef:
+      type: object
+      description: Ссылка на категорию
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+          example: "Смартфоны"
+
+    Image:
+      type: object
+      properties:
+        url:
+          type: string
+          example: "/s3/iphone15-1.jpg"
+        ordering:
+          type: integer
+          example: 0
+
+    CharacteristicValue:
+      type: object
+      description: "Свойство товара или SKU (бренд, цвет, размер, объём памяти)"
+      properties:
+        name:
+          type: string
+          example: "Бренд"
+        value:
+          type: string
+          example: "Apple"
+
+    Invoice:
+      type: object
+      description: "Накладная: список SKU с количествами для отправки на склад"
