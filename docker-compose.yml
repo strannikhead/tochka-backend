@@ -1,0 +1,27 @@
+services:
+  b2b:
+    build:
+      context: .
+      dockerfile: b2b/Dockerfile
+    container_name: b2b
+    ports:
+      - "8001:8000"
+    restart: unless-stopped
+
+  b2c:
+    build:
+      context: .
+      dockerfile: b2c/Dockerfile
+    container_name: b2c
+    ports:
+      - "8002:8000"
+    restart: unless-stopped
+
+  moderation:
+    build:
+      context: .
+      dockerfile: moderation/Dockerfile
+    container_name: moderation
+    ports:
+      - "8003:8000"
+    restart: unless-stopped
