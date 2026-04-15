@@ -1,110 +1,129 @@
-# NeoMarket Protocols
+# Tochka Backend
+
+Монорепозиторий бэкенда NeoMarket: три независимых сервиса, общая библиотека, единый `uv.lock` на весь workspace.
 
 [![API Docs](https://img.shields.io/badge/API%20Docs-Swagger%20UI-85ea2d?logo=swagger)](https://urfu2026-neomarket.github.io/neomarket-protocols/)
 
-OpenAPI-спецификации модулей NeoMarket. Восстановлены на Protocol Summit.
-
 ## Структура
 
-| Директория | Модуль | Кто проектирует |
-|-----------|--------|-----------------|
-| `b2b/` | Seller Cabinet (B2B) | reference |
-| `moderation/` | Moderation | reference |
-| `b2c/catalog/` | Каталог + Карточка товара | Forge |
-| `b2c/cart/` | Корзина + Избранное + Главная | Interface |
-| `b2c/orders/` | Заказы | QA Corps |
-| `shared/` | Общие схемы (Product, SKU, etc.) | все |
-
-## Как работать
-
-### Два способа внести изменения
-
-**Способ 1 — Contributor (без форка)**
-
-Напишите координатору вашего синдиката в Telegram — он добавит вас в team `contributors`. После этого вы можете пушить ветки напрямую в этот репозиторий.
-
-**Способ 2 — Fork**
-
-Если не хотите ждать — сделайте fork и отправьте PR из него.
-
-### Флоу работы
-
-1. **Создать ветку** от `master`:
-
-```bash
-git checkout -b {syndicate}/{team}/{block}
+```
+.
+├── b2b/                  # Seller Cabinet (товары, SKU, накладные)
+│   ├── openapi.yaml
+│   ├── pyproject.toml
+│   ├── Dockerfile
+│   └── src/
+│       ├── main.py
+│       └── api/{products,skus,invoices}/
+├── b2c/                  # Каталог, корзина, избранное, главная
+│   ├── catalog/openapi.yaml
+│   ├── cart/openapi.yaml
+│   ├── orders/openapi.yaml
+│   ├── pyproject.toml
+│   ├── Dockerfile
+│   └── src/
+│       ├── main.py
+│       └── api/{products,categories,catalog,cart,favorites,home}/
+├── moderation/           # Модерация карточек товаров
+│   ├── openapi.yaml
+│   ├── pyproject.toml
+│   ├── Dockerfile
+│   └── src/
+│       ├── main.py
+│       └── api/{product_moderation,blocking_reasons}/
+├── shared/               # Общая python-библиотека (модели, JWT, HTTP-клиенты)
+│   ├── pyproject.toml
+│   └── src/shared/
+├── docs/, forge/         # Документация и proto-описания
+├── pyproject.toml        # корень uv-workspace + dev-инструменты
+├── uv.lock
+├── docker-compose.yml
+└── .pre-commit-config.yaml
 ```
 
-Примеры:
-- `forge/copypaste/text-search`
-- `interface/hackerman/cart-add`
-- `qa-corps/bug-hunters/checkout`
+Сервисы `b2b`, `b2c`, `moderation` деплоятся независимо. В рантайме общаются через HTTP (B2C → B2B за ценами/наличием).
 
-2. **Написать спеку** — добавьте или отредактируйте `openapi.yaml` в директории вашего домена.
+## Стек
 
-3. **Запушить и создать PR**:
+**Runtime:** Python 3.14, [uv](https://docs.astral.sh/uv/) (пакетный менеджер + workspace).
 
-```bash
-git push origin {ваша-ветка}
-```
+**Prod-зависимости** (в каждом сервисе):
+- `fastapi` + `uvicorn[standard]` — ASGI-приложение и сервер
+- `pydantic` + `pydantic-settings` — модели и конфиг из env
+- `sqlalchemy[asyncio]` + `alembic` — ORM и миграции
+- `psycopg[binary,pool]` — async-драйвер PostgreSQL
+- `httpx` — async HTTP-клиент для inter-service вызовов
+- `pyjwt` — верификация JWT из `Authorization: Bearer`
+- `redis` — кэширование
+- `shared` — общая библиотека (workspace-dep)
 
-Создайте Pull Request на GitHub. При создании PR автоматически запустится валидация OpenAPI. Координатор вашего синдиката проверит и смержит.
+**Dev-инструменты** (в корневом `pyproject.toml`, группа `dev`):
+- `ruff` — линтер и форматтер
+- `mypy` — статическая типизация
+- `pytest`, `pytest-asyncio`, `pytest-cov` — тесты
+- `schemathesis` — property-based contract-тесты по OpenAPI-спекам
+- `pre-commit` — git-хуки
 
-## Как смотреть документацию
-
-### Онлайн (GitHub Pages)
-
-Документация доступна по адресу: https://urfu2026-neomarket.github.io/neomarket-protocols/
-
-Swagger UI с dropdown для переключения между модулями: B2B, B2C Каталог, B2C Корзина, B2C Заказы, Moderation.
-
-### Локально
-
-```bash
-npm install
-npm run docs
-```
-
-Откроется `http://localhost:3000` с тем же Swagger UI.
-
-Если зависимости уже установлены и спеки уже собраны, можно запустить только сервер:
+## Установка
 
 ```bash
-npm run docs:serve
+# uv сам поставит Python 3.14, если нет
+uv sync --all-packages
+
+# git-хуки
+uv run pre-commit install
 ```
 
-## Координаторы
+## Запуск локально
 
-| Синдикат | Координатор |
-|----------|-------------|
-| Forge | @Ulyanayou |
-| Interface | @shchavr |
-| QA Corps | @TimofeyChugunov |
+Каждый сервис — отдельный uvicorn-процесс:
 
-## Домены B2C (блоки для claim)
+```bash
+uv run uvicorn main:app --app-dir b2b/src        --reload --port 8001
+uv run uvicorn main:app --app-dir b2c/src        --reload --port 8002
+uv run uvicorn main:app --app-dir moderation/src --reload --port 8003
+```
 
-### Forge — Каталог + Карточка товара
-1. Текстовый поиск
-2. Фильтры по характеристикам
-3. Пагинация + сортировка
-4. Карточка: основная инфо + фото
-5. Карточка: выбор SKU (цена, наличие)
-6. Связанные товары / рекомендации
-7. Эндпоинты B2C -> B2B: формат запроса данных
+Swagger UI у каждого — `/docs`, OpenAPI JSON — `/openapi.json`.
 
-### Interface — Корзина + Избранное + Главная
-1. Корзина: добавить товар
-2. Корзина: просмотр (актуальные цены из B2B)
-3. Корзина: изменить количество / удалить
-4. Избранное: CRUD + список
-5. Главная: категории + баннеры
-6. Главная: подборки / популярные
-7. Обогащение данных: как получать цены/остатки из B2B
+## Запуск в Docker
 
-### QA Corps — Заказы
-1. Checkout: из корзины -> резерв -> заказ
-2. Статусы заказа: state machine
-3. Отмена заказа + unreserve
-4. История заказов: список + детали
-5. Резервирование: формат B2C -> B2B
-6. Edge cases: товар заблокирован / закончился
+```bash
+docker compose up --build
+```
+
+| Сервис     | URL                   |
+|------------|-----------------------|
+| b2b        | http://localhost:8001 |
+| b2c        | http://localhost:8002 |
+| moderation | http://localhost:8003 |
+
+**Как устроены образы:** каждый Dockerfile тянет только свои файлы (`<service>/pyproject.toml` + `<service>/src` + `shared/` + корневой `uv.lock`), делает `uv sync --frozen --package <name> --no-dev` в `/app/.venv`, запускает `uvicorn` напрямую. Манифесты других сервисов в образ не попадают.
+
+## Тесты, линтер, типы
+
+```bash
+uv run pytest                         # все тесты (b2b/tests, b2c/tests, moderation/tests, shared/tests)
+uv run ruff check .                   # линт
+uv run ruff format .                  # форматирование
+uv run mypy shared/src b2b/src b2c/src moderation/src  # типы
+```
+
+## Добавить зависимость
+
+В конкретный сервис:
+```bash
+uv add --package b2c-service <package>
+```
+
+В общую библиотеку `shared`:
+```bash
+uv add --package shared <package>
+```
+
+В dev-группу workspace:
+```bash
+uv add --group dev <package>
+```
+
+После любого `uv add` коммитьте обновлённый `uv.lock`.
