@@ -67,7 +67,7 @@ wheels = [
 [[package]]
 name = "b2b-service"
 version = "0.0.0"
-source = { editable = "b2b" }
+source = { virtual = "b2b" }
 dependencies = [
     { name = "alembic" },
     { name = "fastapi" },
@@ -100,7 +100,7 @@ requires-dist = [
 [[package]]
 name = "b2c-service"
 version = "0.0.0"
-source = { editable = "b2c" }
+source = { virtual = "b2c" }
 dependencies = [
     { name = "alembic" },
     { name = "fastapi" },
@@ -608,7 +608,7 @@ wheels = [
 [[package]]
 name = "moderation-service"
 version = "0.0.0"
-source = { editable = "moderation" }
+source = { virtual = "moderation" }
 dependencies = [
     { name = "alembic" },
     { name = "fastapi" },
