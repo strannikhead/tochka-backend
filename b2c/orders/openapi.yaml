@@ -1,10 +1,2242 @@
 openapi: 3.0.3
 info:
   title: "NeoMarket B2C: Заказы"
-  version: "0.1"
+  version: 1.0.0
   description: |
     Проектируется синдикатом QA Corps.
-    Домены: оформление заказа, статусы (state machine), отмена, история заказов.
+    Домены: оформление заказа, статусы (state machine), отмена, история заказов, каталог и корзина.
+tags:
+  - name: Auth
+  - name: Profile
+  - name: Addresses
+  - name: Payments
+  - name: StockReserve
+  - name: Notifications
+  - name: Orders
+  - name: Analytics
+  - name: Catalog
+  - name: Cart
+security:
+  - bearerHttpAuthentication: []
+paths:
+  /auth/login:
+    post:
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequestDTO'
+      responses:
+        '200':
+          description: Успешная аутентификация
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponseDTO'
+  /auth/register:
+    post:
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequestDTO'
+      responses:
+        '201':
+          description: Пользователь успешно зарегистрирован
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponseDTO'
+  /profile:
+    get:
+      tags: [Profile]
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Профиль пользователя получен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponseDTO'
+    patch:
+      tags: [Profile]
+      security: [{bearerAuth: []}]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequestDTO'
+      responses:
+        '200':
+          description: Профиль успешно обновлен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponseDTO'
+  /addresses:
+    get:
+      tags: [Addresses]
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: limit
+          in: query
+          schema: {type: integer, default: 20}
+        - name: offset
+          in: query
+          schema: {type: integer, default: 0}
+      responses:
+        '200':
+          description: Список адресов получен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddressesPaginatedResponseDTO'
+    post:
+      tags: [Addresses]
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAddressRequestDTO'
+      responses:
+        '201':
+          description: Адрес успешно создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddressResponseDTO'
+  /addresses/{addressId}:
+    parameters:
+      - name: addressId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      tags: [Addresses]
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Адрес получен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddressResponseDTO'
+    put:
+      tags: [Addresses]
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAddressRequestDTO'
+      responses:
+        '200':
+          description: Адрес успешно обновлен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddressResponseDTO'
+    delete:
+      tags: [Addresses]
+      security: [{bearerAuth: []}]
+      responses:
+        '204':
+          description: Адрес успешно удален
+  /payments/methods:
+    get:
+      tags: [Payments]
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: limit
+          in: query
+          schema: {type: integer, default: 20}
+        - name: offset
+          in: query
+          schema: {type: integer, default: 0}
+      responses:
+        '200':
+          description: Список платежных методов получен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentMethodsPaginatedResponseDTO'
+    post:
+      tags: [Payments]
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePaymentMethodRequestDTO'
+      responses:
+        '201':
+          description: Платежный метод успешно создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentMethodResponseDTO'
+  /orders/create:
+    post:
+      tags: [Orders]
+      summary: Создать заказ (подтверждение)
+      description: |
+        Финализация оформления заказа: сервис генерирует `id` (UUID) и атомарно создает запись заказа.
 
-paths: {}
-# Здесь команды QA Corps описывают свои эндпоинты
+        Побочный эффект: сервис публикует доменное событие **`order.created`** (см. `NotificationEventType`).
+      operationId: createOrder
+      security: [{bearerHttpAuthentication: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequestDTO'
+      responses:
+        '201':
+          description: Заказ создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateOrderResponseDTO'
+        '400':
+          description: Некорректные данные
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Не авторизован
+        '409':
+          description: Конфликт создания заказа (например, заказ уже создан для данного checkout)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /orders/history:
+    get:
+      tags: [Orders]
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: status
+          in: query
+          schema: {$ref: '#/components/schemas/OrderStatus'}
+        - name: date_from
+          in: query
+          schema: {type: string, format: date-time}
+        - name: date_to
+          in: query
+          schema: {type: string, format: date-time}
+        - name: limit
+          in: query
+          schema: {type: integer, default: 20}
+        - name: offset
+          in: query
+          schema: {type: integer, default: 0}
+      responses:
+        '200':
+          description: История заказов получена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrdersHistoryResponseDTO'
+  /stock/reserve/{order_id}:
+    post:
+      tags: [StockReserve]
+      summary: Зарезервировать товары по заказу
+      operationId: reserveStock
+      parameters:
+        - name: order_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReserveRequest'
+      responses:
+        '201':
+          description: Резерв создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+        '200':
+          description: Идемпотентный повтор — резерв уже существует
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+        '409':
+          description: Недостаточно stock
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '424':
+          description: Ошибка интеграции со складом
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    get:
+      tags: [StockReserve]
+      summary: Получить статус резерва по заказу
+      operationId: getReservation
+      parameters:
+        - name: order_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Статус найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+        '404':
+          description: Резерв не найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /stock/reserve/{order_id}/commit:
+    post:
+      tags: [StockReserve]
+      summary: Подтвердить резерв и списать товар (write-off)
+      operationId: commitReservation
+      parameters:
+        - name: order_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Списание выполнено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+        '409':
+          description: Некорректный статус резерва для списания
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '424':
+          description: Ошибка интеграции со складом
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /stock/reserve/{order_id}/release:
+    post:
+      tags: [StockReserve]
+      summary: Снять резерв и вернуть товар в доступный stock
+      operationId: releaseReservation
+      parameters:
+        - name: order_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Возврат выполнен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+        '409':
+          description: Некорректный статус резерва для возврата
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '424':
+          description: Ошибка интеграции со складом
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/internal/notification-events:
+    post:
+      tags: [Notifications]
+      summary: Принять доменное событие от других сервисов для создания уведомления
+      description: |
+        Internal endpoint для интеграции с сервисами заказов, статусов, резервирования и оплаты.
+        На вход принимает унифицированный контракт события.
+        Сервис уведомлений сам определяет:
+        - нужно ли создавать уведомление
+        - по какому шаблону
+        - в какие каналы отправлять (email / sms / push)
+      security:
+        - bearerHttpAuthentication: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationEvent'
+      responses:
+        '202':
+          description: Событие принято в обработку
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventAcceptedResponse'
+        '400':
+          description: Некорректный формат события
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Не авторизован
+        '409':
+          description: Событие с таким event_id уже обработано
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/notifications:
+    get:
+      tags: [Notifications]
+      summary: Получить список уведомлений пользователя
+      description: |
+        Возвращает уведомления текущего пользователя для личного кабинета.
+        Можно фильтровать по статусу прочтения, каналу и типу события.
+      security:
+        - bearerHttpAuthentication: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            example: 20
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            example: 0
+        - name: is_read
+          in: query
+          required: false
+          schema:
+            type: boolean
+            example: false
+        - name: channel
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/NotificationChannel'
+        - name: event_type
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/NotificationEventType'
+      responses:
+        '200':
+          description: Успешный ответ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationListResponse'
+        '401':
+          description: Не авторизован
+  /api/v1/notifications/{notification_id}:
+    get:
+      tags: [Notifications]
+      summary: Получить одно уведомление
+      security:
+        - bearerHttpAuthentication: []
+      parameters:
+        - name: notification_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Успешный ответ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '400':
+          description: Некорректный id уведомления
+        '401':
+          description: Не авторизован
+        '404':
+          description: Уведомление не найдено
+  /api/v1/notifications/{notification_id}/read:
+    patch:
+      tags: [Notifications]
+      summary: Отметить уведомление как прочитанное
+      security:
+        - bearerHttpAuthentication: []
+      parameters:
+        - name: notification_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Уведомление отмечено как прочитанное
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '400':
+          description: Некорректный id уведомления
+        '401':
+          description: Не авторизован
+        '404':
+          description: Уведомление не найдено
+  /api/v1/notifications/read-all:
+    patch:
+      tags: [Notifications]
+      summary: Отметить все уведомления пользователя как прочитанные
+      security:
+        - bearerHttpAuthentication: []
+      responses:
+        '200':
+          description: Все уведомления отмечены как прочитанные
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarkAllReadResponse'
+        '401':
+          description: Не авторизован
+  /api/v1/internal/notifications/{notification_id}/retry:
+    post:
+      tags: [Notifications]
+      summary: Повторно отправить уведомление
+      description: |
+        Технический internal endpoint.
+        Нужен для ретрая уведомлений со статусом FAILED.
+      security:
+        - bearerHttpAuthentication: []
+      parameters:
+        - name: notification_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Повторная отправка запущена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetryNotificationResponse'
+        '400':
+          description: Некорректный id уведомления или уведомление нельзя ретраить
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Не авторизован
+        '404':
+          description: Уведомление не найдено
+  /api/v1/internal/notifications/test:
+    post:
+      tags: [Notifications]
+      summary: Отправить тестовое уведомление
+      description: |
+        Технический endpoint для проверки шаблонов и каналов доставки.
+        Полезен для разработки, демонстрации и интеграционных тестов.
+      security:
+        - bearerHttpAuthentication: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TestNotificationRequest'
+      responses:
+        '200':
+          description: Тестовое уведомление отправлено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestNotificationResponse'
+        '400':
+          description: Некорректный запрос
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Не авторизован
+  /orders:
+    get:
+      tags: [Orders]
+      summary: Получение списка заказов пользователя
+      operationId: getOrders
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+          description: Количество записей на странице
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: Смещение для пагинации
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum:
+              - pending
+              - reserved
+              - reservation_failed
+              - paid
+              - payment_failed
+              - preparing
+              - shipping
+              - delivered
+              - completed
+              - cancelled
+              - refunded
+          description: Фильтр по статусу заказа
+        - name: date_from
+          in: query
+          schema:
+            type: string
+            format: date
+          description: Начальная дата создания заказа (включительно)
+        - name: date_to
+          in: query
+          schema:
+            type: string
+            format: date
+          description: Конечная дата создания заказа (включительно)
+      responses:
+        '200':
+          description: Успешный ответ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderListResponse'
+        '401':
+          description: Не авторизован
+  /orders/{order_id}:
+    get:
+      tags: [Orders]
+      summary: Получение детальной информации о заказе
+      operationId: getOrderById
+      parameters:
+        - name: order_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Идентификатор заказа
+      responses:
+        '200':
+          description: Успешный ответ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderDetails'
+        '400':
+          description: Некорректный id заказа
+        '401':
+          description: Не авторизован
+        '403':
+          description: Нет прав на просмотр этого заказа
+        '404':
+          description: Заказ не найден
+  /analytics/orders:
+    get:
+      tags: [Analytics]
+      summary: Получение аналитических отчётов по заказам
+      operationId: getOrdersAnalytics
+      parameters:
+        - name: group_by
+          in: query
+          schema:
+            type: string
+            enum:
+              - day
+              - week
+              - month
+              - status
+            default: day
+          description: Способ группировки данных (day/week/month — временная, status — по статусам)
+        - name: date_from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          description: Начальная дата периода
+        - name: date_to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          description: Конечная дата периода
+        - name: user_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Фильтр по конкретному пользователю (только для админа/менеджера)
+      responses:
+        '200':
+          description: Успешный ответ
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/AnalyticsTimeSeries'
+                  - $ref: '#/components/schemas/AnalyticsByStatus'
+        '400':
+          description: Неверные параметры запроса
+        '401':
+          description: Не авторизован
+        '403':
+          description: Недостаточно прав
+  /orders/{order_id}/cancel:
+    post:
+      summary: Отменить заказ
+      description: |
+        Инициирует отмену заказа. Поведение зависит от текущего статуса заказа:
+        1. CREATED: Снятие брони, товары доступны. Статус -> CANCELLED.
+        2. PAID / ASSEMBLING: Возврат денег, снятие брони, товары доступны. Статус -> CANCELLED.
+        3. DELIVERING / DELIVERED: Возврат денег, товар отправляется на склад. Статус -> CANCELLED.
+        Бронь снимается только после физического возврата на склад.
+      security:
+        - bearerHttpAuthentication: []
+      parameters:
+        - name: order_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Уникальный идентификатор заказа
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelRequest'
+      responses:
+        '200':
+          description: Заказ успешно отменен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CancelResponse'
+        '400':
+          description: Некорректный запрос (например, заказ уже отменен)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Не авторизован
+        '403':
+          description: Нет прав на отмену данного заказа
+        '404':
+          description: Заказ не найден
+        '422':
+          description: Невозможно отменить заказ в текущем статусе
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /orders/{order_id}/returns:
+    post:
+      summary: Создать заявку на возврат (после получения)
+      description: |
+        Используется, если покупатель получил товар (статус DELIVERED) и хочет его вернуть.
+        Создает сущность Возврата со статусом PENDING. Требует одобрения администратора.
+        Деньги не возвращаются до одобрения. Товар не разбронируется до возврата на склад.
+      security:
+        - bearerHttpAuthentication: []
+      parameters:
+        - name: order_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReturnRequestCreate'
+      responses:
+        '201':
+          description: Заявка на возврат создана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReturnRequest'
+        '400':
+          description: Некорректные данные формы
+        '401':
+          description: Не авторизован
+        '403':
+          description: Нет прав (например, заказ еще не доставлен)
+        '404':
+          description: Заказ не найден
+
+  /catalog/search:
+    get:
+      tags: [Catalog]
+      summary: Поиск и фильтрация товаров
+      description: |
+        Интеграция с внешним каталогом. Поддерживает полнотекстовый поиск, фильтрацию по цене, категориям и сортировку.
+        Для быстрой работы на стороне БД должны быть настроены B-Tree индексы на `category_id`, `price` и GIN/GiST индексы для полнотекстового поиска.
+      operationId: searchProducts
+      parameters:
+        - name: q
+          in: query
+          description: Строка для полнотекстового поиска
+          schema:
+            type: string
+        - name: category_id
+          in: query
+          description: Фильтр по категории
+          schema:
+            type: string
+            format: uuid
+        - name: min_price
+          in: query
+          schema:
+            type: number
+            minimum: 0
+        - name: max_price
+          in: query
+          schema:
+            type: number
+            minimum: 0
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [price_asc, price_desc, rating_desc, newest]
+            default: newest
+        - name: limit
+          in: query
+          schema: {type: integer, default: 20}
+        - name: offset
+          in: query
+          schema: {type: integer, default: 0}
+      responses:
+        '200':
+          description: Успешный поиск товаров
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductListResponse'
+
+  /products/{id}:
+    get:
+      tags: [Catalog]
+      summary: Получить карточку товара
+      operationId: getProductById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Детальная информация о товаре
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '404':
+          description: Товар не найден
+
+  /products/{id}/recommendations:
+    get:
+      tags: [Catalog]
+      summary: Получить рекомендации для товара
+      description: Возвращает список сопутствующих или похожих товаров.
+      operationId: getProductRecommendations
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Список рекомендованных товаров
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductListResponse'
+
+  /cart:
+    get:
+      tags: [Cart]
+      summary: Получить корзину текущего пользователя
+      operationId: getCart
+      security:
+        - bearerHttpAuthentication: []
+      responses:
+        '200':
+          description: Содержимое корзины
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cart'
+        '401':
+          description: Не авторизован
+
+  /cart/items:
+    post:
+      tags: [Cart]
+      summary: Добавить товар в корзину
+      description: |
+        Добавляет товар в корзину пользователя. 
+        Генерирует доменное событие `cart.item_added` для аналитики или других микросервисов.
+      operationId: addToCart
+      security:
+        - bearerHttpAuthentication: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddToCartRequest'
+      responses:
+        '200':
+          description: Товар успешно добавлен, возвращается обновленная корзина
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cart'
+        '400':
+          description: Некорректные данные (например, отрицательное количество)
+        '404':
+          description: Товар не найден в каталоге
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+    bearerHttpAuthentication:
+      description: Bearer token (JWT)
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        code: {type: string}
+        message: {type: string}
+    UserRole:
+      type: string
+      enum: [BUYER, SELLER, ADMIN, MODERATOR]
+
+    PaymentMethodType:
+      type: string
+      enum: [CARD, SBP, POST_PAYMENT]
+
+    OrderStatus:
+      type: string
+      enum: [PENDING, CONFIRMED, PROCESSING, SHIPPED, DELIVERED, CANCELLED, REFUNDED]
+
+    DeliveryMethod:
+      type: string
+      enum: [COURIER, PICKUP, POST, EXPRESS]
+
+    LoginRequestDTO:
+      type: object
+      properties:
+        email: {type: string, format: email}
+        password: {type: string}
+      required: [email, password]
+
+    LoginResponseDTO:
+      type: object
+      properties:
+        access_token: {type: string}
+        token_type: {type: string, default: Bearer}
+        user: {$ref: '#/components/schemas/UserResponseDTO'}
+      required: [access_token, token_type, user]
+
+    RegisterRequestDTO:
+      type: object
+      properties:
+        email: {type: string, format: email}
+        password: {type: string}
+        first_name: {type: string}
+        last_name: {type: string}
+        phone: {type: string, pattern: '^\+?[1-9][0-9]{7,14}$'}
+      required: [email, password, first_name, last_name]
+
+    UserResponseDTO:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        email: {type: string, format: email}
+        first_name: {type: string}
+        last_name: {type: string}
+        phone: {type: string, pattern: '^\+?[1-9][0-9]{7,14}$'}
+        role: {$ref: '#/components/schemas/UserRole'}
+        created_at: {type: string, format: date-time}
+      required: [id, email, first_name, last_name, role, created_at]
+
+    UpdateProfileRequestDTO:
+      type: object
+      properties:
+        first_name: {type: string}
+        last_name: {type: string}
+        phone: {type: string, pattern: '^\+?[1-9][0-9]{7,14}$'}
+
+    AddressResponseDTO:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        user_id: {type: string, format: uuid}
+        title: {type: string}
+        recipient_name: {type: string}
+        phone: {type: string, pattern: '^\+?[1-9][0-9]{7,14}$'}
+        city: {type: string}
+        street: {type: string}
+        house: {type: string}
+        apartment: {type: string}
+        is_default: {type: boolean}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+      required: [id, user_id, recipient_name, phone, city, street, house, is_default, created_at, updated_at]
+
+    CreateAddressRequestDTO:
+      type: object
+      properties:
+        title: {type: string}
+        recipient_name: {type: string}
+        phone: {type: string, pattern: '^\+?[1-9][0-9]{7,14}$'}
+        city: {type: string}
+        street: {type: string}
+        house: {type: string}
+        apartment: {type: string}
+        is_default: {type: boolean, default: false}
+      required: [recipient_name, phone, city, street, house]
+
+    UpdateAddressRequestDTO:
+      type: object
+      properties:
+        title: {type: string}
+        recipient_name: {type: string}
+        phone: {type: string, pattern: '^\+?[1-9][0-9]{7,14}$'}
+        city: {type: string}
+        street: {type: string}
+        house: {type: string}
+        apartment: {type: string}
+        is_default: {type: boolean}
+
+    PaymentMethodResponseDTO:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        type: {$ref: '#/components/schemas/PaymentMethodType'}
+        last_four: {type: string}
+        cardholder_name: {type: string}
+        expiry_month: {type: integer}
+        expiry_year: {type: integer}
+        is_default: {type: boolean}
+        created_at: {type: string, format: date-time}
+      required: [id, type, is_default, created_at]
+
+    CreatePaymentMethodRequestDTO:
+      type: object
+      properties:
+        type: {$ref: '#/components/schemas/PaymentMethodType'}
+        token: {type: string}
+        is_default: {type: boolean, default: false}
+      required: [type, token]
+
+    CreateOrderRequestDTO:
+      type: object
+      description: |
+        Минимальный контракт для создания заказа на этапе подтверждения.
+        Идентификатор (`id`) генерируется на стороне сервиса.
+      required: [total]
+      properties:
+        total:
+          type: number
+          minimum: 0
+          example: 132980.00
+        currency:
+          type: string
+          description: Валюта (опционально, по умолчанию RUB)
+          default: RUB
+          example: RUB
+        source:
+          type: string
+          description: Источник создания (опционально)
+          example: web
+        checkout_id:
+          type: string
+          format: uuid
+          description: Идентификатор процесса checkout (из блоков 4–5), если используется
+          nullable: true
+
+    CreateOrderResponseDTO:
+      type: object
+      required: [id, total, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Идентификатор заказа (UUID)
+          example: "66666666-7777-8888-9999-aaaaaaaaaaaa"
+        total:
+          type: number
+          minimum: 0
+          example: 132980.00
+        status:
+          type: string
+          description: |
+            Статус заказа сразу после создания.
+            Для Блока 6 — `new` (в БД хранится как `status='new'`).
+          enum: [new]
+          example: new
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-03-18T12:34:56Z"
+
+    Item:
+      type: object
+      properties:
+        product_id: {type: string, format: uuid}
+        product_name: {type: string}
+        quantity: {type: integer, minimum: 1}
+        price: {type: number, exclusiveMinimum: true}
+        total_price: {type: number, exclusiveMinimum: true}
+        prodavec: {type: string, format: uuid}
+      required: [product_id, product_name, quantity, price, total_price, prodavec]
+
+    OrderResponseDTO:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        user_id: {type: string, format: uuid}
+        status: {$ref: '#/components/schemas/OrderStatus'}
+        items: {type: array, items: {$ref: '#/components/schemas/Item'}}
+        delivery_method: {$ref: '#/components/schemas/DeliveryMethod'}
+        delivery_address: {$ref: '#/components/schemas/AddressResponseDTO'}
+        delivery_cost: {type: number, minimum: 0}
+      required: [id, user_id, status, items, delivery_method, delivery_cost]
+
+    AddressesPaginatedResponseDTO:
+      type: object
+      properties:
+        total: {type: integer, minimum: 0}
+        items: {type: array, items: {$ref: '#/components/schemas/AddressResponseDTO'}}
+      required: [total, items]
+
+    PaymentMethodsPaginatedResponseDTO:
+      type: object
+      properties:
+        total: {type: integer, minimum: 0}
+        items: {type: array, items: {$ref: '#/components/schemas/PaymentMethodResponseDTO'}}
+      required: [total, items]
+
+    OrdersHistoryResponseDTO:
+      type: object
+      properties:
+        total: {type: integer, minimum: 0}
+        items: {type: array, items: {$ref: '#/components/schemas/OrderResponseDTO'}}
+        applied_filters: {type: object}
+        query_time_ms: {type: integer, minimum: 0}
+      required: [total, items]
+
+    ReserveRequest:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ReserveItem'
+        ttl_seconds:
+          type: integer
+          minimum: 60
+          default: 900
+          description: Время жизни резерва (таймаут), после которого cron снимет резерв
+
+    ReserveItem:
+      type: object
+      required:
+        - product_id
+        - quantity
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+          minimum: 1
+
+    Reservation:
+      type: object
+      required:
+        - order_id
+        - status
+        - created_at
+        - expires_at
+        - reserved_products
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+            - pending
+            - reserved
+            - reservation_failed
+            - paid
+            - payment_failed
+            - preparing
+            - shipping
+            - delivered
+            - completed
+            - cancelled
+            - refunded
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        reserved_products:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReservedProduct'
+
+    ReservedProduct:
+      type: object
+      description: Соответствует строке в таблице reserved_products
+      required:
+        - order_id
+        - product_id
+        - quantity
+        - created_at
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+          minimum: 1
+        created_at:
+          type: string
+          format: date-time
+
+    OrderSummary:
+      type: object
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        total_price:
+          type: number
+          format: float
+        status:
+          type: string
+          enum:
+            - pending
+            - reserved
+            - reservation_failed
+            - paid
+            - payment_failed
+            - preparing
+            - shipping
+            - delivered
+            - completed
+            - cancelled
+            - refunded
+        item_count:
+          type: integer
+          description: Количество позиций в заказе
+
+    OrderDetails:
+      allOf:
+        - $ref: '#/components/schemas/OrderSummary'
+        - type: object
+          properties:
+            updated_at:
+              type: string
+              format: date-time
+            shipping_address:
+              type: string
+            payment_method:
+              type: string
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/OrderItem'
+            reservation:
+              $ref: '#/components/schemas/Reservation'
+
+    OrderItem:
+      type: object
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        product_name:
+          type: string
+        quantity:
+          type: integer
+        price_at_purchase:
+          type: number
+          format: float
+        subtotal:
+          type: number
+          format: float
+
+    OrderListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderSummary'
+        total:
+          type: integer
+          description: Общее количество заказов (без учёта пагинации)
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    AnalyticsTimeSeries:
+      type: object
+      properties:
+        group_by:
+          type: string
+          enum:
+            - day
+            - week
+            - month
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              period:
+                type: string
+                format: date
+              orders_count:
+                type: integer
+              total_revenue:
+                type: number
+                format: float
+              avg_order_value:
+                type: number
+                format: float
+
+    AnalyticsByStatus:
+      type: object
+      properties:
+        group_by:
+          type: string
+          enum:
+            - status
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              status:
+                type: string
+                enum:
+                  - pending
+                  - reserved
+                  - reservation_failed
+                  - paid
+                  - payment_failed
+                  - preparing
+                  - shipping
+                  - delivered
+                  - completed
+                  - cancelled
+                  - refunded
+              count:
+                type: integer
+              total_revenue:
+                type: number
+                format: float
+
+    Error:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+
+    NotificationEventType:
+      type: string
+      enum:
+        - order.created
+        - order.status_changed
+        - order.reserved
+        - order.reserve_failed
+        - order.reserve_released
+        - order.cancelled_by_user
+        - order.cancelled_by_admin
+        - order.cancelled_automatically
+        - payment.refunded
+        - cart.item_added
+      example: order.created
+
+    NotificationChannel:
+      type: string
+      enum:
+        - email
+        - sms
+        - push
+      example: email
+
+    DeliveryStatus:
+      type: string
+      enum:
+        - pending
+        - sent
+        - failed
+      example: sent
+
+    OrderWorkflowStatus:
+      type: string
+      enum:
+        - CREATED
+        - PAID
+        - ASSEMBLING
+        - DELIVERING
+        - DELIVERED
+        - CANCELLED
+      example: PAID
+
+    NotificationEvent:
+      type: object
+      required:
+        - event_id
+        - event_type
+        - event_version
+        - occurred_at
+        - source
+        - user_id
+        - order_id
+        - data
+      properties:
+        event_id:
+          type: string
+          format: uuid
+          description: Уникальный идентификатор события для идемпотентности
+          example: "5f7d0d8b-4d3f-4d0d-9d6d-8f4a7c2e1b11"
+        event_type:
+          $ref: '#/components/schemas/NotificationEventType'
+        event_version:
+          type: integer
+          description: Версия контракта события
+          example: 1
+        occurred_at:
+          type: string
+          format: date-time
+          description: Время возникновения события
+          example: "2026-03-09T10:15:30Z"
+        source:
+          type: string
+          description: Имя сервиса-источника
+          example: "order-status-service"
+        user_id:
+          type: string
+          format: uuid
+          description: Идентификатор пользователя
+          example: "11111111-2222-3333-4444-555555555555"
+        order_id:
+          type: string
+          format: uuid
+          description: Идентификатор заказа
+          example: "66666666-7777-8888-9999-aaaaaaaaaaaa"
+        data:
+          oneOf:
+            - $ref: '#/components/schemas/OrderCreatedEventData'
+            - $ref: '#/components/schemas/OrderStatusChangedEventData'
+            - $ref: '#/components/schemas/OrderReservedEventData'
+            - $ref: '#/components/schemas/OrderReserveFailedEventData'
+            - $ref: '#/components/schemas/OrderReserveReleasedEventData'
+            - $ref: '#/components/schemas/OrderCancelledByUserEventData'
+            - $ref: '#/components/schemas/OrderCancelledByAdminEventData'
+            - $ref: '#/components/schemas/OrderCancelledAutomaticallyEventData'
+            - $ref: '#/components/schemas/PaymentRefundedEventData'
+            - $ref: '#/components/schemas/CartItemAddedEventData'
+
+    OrderCreatedEventData:
+      type: object
+      required:
+        - order_number
+        - total_amount
+        - currency
+      properties:
+        order_number:
+          type: string
+          example: "ORD-20260309-501"
+        total_amount:
+          type: number
+          example: 132980.00
+        currency:
+          type: string
+          example: "RUB"
+        items_count:
+          type: integer
+          example: 2
+        delivery_type:
+          type: string
+          example: "courier"
+        payment_type:
+          type: string
+          example: "card"
+
+    OrderStatusChangedEventData:
+      type: object
+      required:
+        - order_number
+        - old_status
+        - new_status
+      properties:
+        order_number:
+          type: string
+          example: "ORD-20260309-501"
+        old_status:
+          $ref: '#/components/schemas/OrderWorkflowStatus'
+        new_status:
+          $ref: '#/components/schemas/OrderWorkflowStatus'
+        reason:
+          type: string
+          nullable: true
+          example: null
+        initiator:
+          type: string
+          enum:
+            - user
+            - admin
+            - system
+          example: system
+
+    OrderReservedEventData:
+      type: object
+      required:
+        - order_number
+        - reservation_id
+      properties:
+        order_number:
+          type: string
+          example: "ORD-20260309-501"
+        reservation_id:
+          type: string
+          format: uuid
+          example: "bbbbbbbb-cccc-dddd-eeee-ffffffffffff"
+        reserved_until:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2026-03-09T11:16:00Z"
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReservedItem'
+
+    OrderReserveFailedEventData:
+      type: object
+      required:
+        - order_number
+        - reason_code
+      properties:
+        order_number:
+          type: string
+          example: "ORD-20260309-501"
+        reason_code:
+          type: string
+          example: "INSUFFICIENT_STOCK"
+        reason_message:
+          type: string
+          example: "One or more items are out of stock"
+        failed_items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FailedReserveItem'
+
+    OrderReserveReleasedEventData:
+      type: object
+      required:
+        - order_number
+        - reservation_id
+        - reason_code
+      properties:
+        order_number:
+          type: string
+          example: "ORD-20260309-501"
+        reservation_id:
+          type: string
+          format: uuid
+          example: "bbbbbbbb-cccc-dddd-eeee-ffffffffffff"
+        reason_code:
+          type: string
+          example: "ORDER_CANCELLED"
+        reason_message:
+          type: string
+          example: "Reservation released because order was cancelled"
+
+    OrderCancelledByUserEventData:
+      type: object
+      required:
+        - order_number
+        - previous_status
+        - cancel_reason_code
+      properties:
+        order_number:
+          type: string
+          example: "ORD-20260309-501"
+        previous_status:
+          $ref: '#/components/schemas/OrderWorkflowStatus'
+        cancel_reason_code:
+          type: string
+          example: "USER_CHANGED_MIND"
+        cancel_reason_text:
+          type: string
+          example: "Передумал оформлять заказ"
+
+    OrderCancelledByAdminEventData:
+      type: object
+      required:
+        - order_number
+        - previous_status
+        - cancel_reason_code
+      properties:
+        order_number:
+          type: string
+          example: "ORD-20260309-501"
+        previous_status:
+          $ref: '#/components/schemas/OrderWorkflowStatus'
+        cancel_reason_code:
+          type: string
+          example: "WAREHOUSE_ISSUE"
+        cancel_reason_text:
+          type: string
+          example: "Товар недоступен на складе"
+        initiator_id:
+          type: string
+          format: uuid
+          example: "99999999-8888-7777-6666-555555555555"
+
+    OrderCancelledAutomaticallyEventData:
+      type: object
+      required:
+        - order_number
+        - previous_status
+        - cancel_reason_code
+      properties:
+        order_number:
+          type: string
+          example: "ORD-20260309-501"
+        previous_status:
+          $ref: '#/components/schemas/OrderWorkflowStatus'
+        cancel_reason_code:
+          type: string
+          example: "PAYMENT_TIMEOUT"
+        cancel_reason_text:
+          type: string
+          example: "Заказ автоматически отменен из-за истечения времени оплаты"
+
+    PaymentRefundedEventData:
+      type: object
+      required:
+        - order_number
+        - refund_amount
+        - currency
+      properties:
+        order_number:
+          type: string
+          example: "ORD-20260309-501"
+        refund_amount:
+          type: number
+          example: 132980.00
+        currency:
+          type: string
+          example: "RUB"
+        refund_id:
+          type: string
+          example: "refund-12345"
+        reason_code:
+          type: string
+          example: "ORDER_CANCELLED"
+
+    CartItemAddedEventData:
+      type: object
+      required: [product_id, quantity, user_id]
+      properties:
+        product_id: {type: string, format: uuid}
+        quantity: {type: integer}
+        user_id: {type: string, format: uuid}
+        price_at_addition: {type: number, format: float}
+
+    ReservedItem:
+      type: object
+      required:
+        - sku_id
+        - quantity
+      properties:
+        sku_id:
+          type: string
+          example: "sku-iphone-256-black"
+        quantity:
+          type: integer
+          example: 1
+
+    FailedReserveItem:
+      type: object
+      required:
+        - sku_id
+        - requested_quantity
+      properties:
+        sku_id:
+          type: string
+          example: "sku-iphone-256-black"
+        requested_quantity:
+          type: integer
+          example: 1
+        available_quantity:
+          type: integer
+          example: 0
+
+    Notification:
+      type: object
+      required:
+        - id
+        - user_id
+        - order_id
+        - event_type
+        - channel
+        - title
+        - body
+        - status
+        - is_read
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "2efb63a9-60bb-4b6d-a8bb-0cefc91ed112"
+        user_id:
+          type: string
+          format: uuid
+          example: "11111111-2222-3333-4444-555555555555"
+        order_id:
+          type: string
+          format: uuid
+          example: "66666666-7777-8888-9999-aaaaaaaaaaaa"
+        event_type:
+          $ref: '#/components/schemas/NotificationEventType'
+        channel:
+          $ref: '#/components/schemas/NotificationChannel'
+        title:
+          type: string
+          example: "Заказ оплачен"
+        body:
+          type: string
+          example: "Ваш заказ ORD-20260309-501 успешно оплачен."
+        status:
+          $ref: '#/components/schemas/DeliveryStatus'
+        is_read:
+          type: boolean
+          example: false
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-03-09T11:00:02Z"
+        sent_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2026-03-09T11:00:05Z"
+        read_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: null
+        metadata:
+          type: object
+          additionalProperties: true
+
+    NotificationListResponse:
+      type: object
+      required:
+        - total_count
+        - limit
+        - offset
+        - items
+      properties:
+        total_count:
+          type: integer
+          example: 12
+        limit:
+          type: integer
+          example: 20
+        offset:
+          type: integer
+          example: 0
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Notification'
+
+    EventAcceptedResponse:
+      type: object
+      required:
+        - event_id
+        - accepted
+      properties:
+        event_id:
+          type: string
+          format: uuid
+          example: "5f7d0d8b-4d3f-4d0d-9d6d-8f4a7c2e1b11"
+        accepted:
+          type: boolean
+          example: true
+        notification_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+
+    MarkAllReadResponse:
+      type: object
+      required:
+        - updated_count
+      properties:
+        updated_count:
+          type: integer
+          example: 8
+
+    RetryNotificationResponse:
+      type: object
+      required:
+        - notification_id
+        - status
+      properties:
+        notification_id:
+          type: string
+          format: uuid
+          example: "2efb63a9-60bb-4b6d-a8bb-0cefc91ed112"
+        status:
+          type: string
+          example: "retry_started"
+
+    TestNotificationRequest:
+      type: object
+      required:
+        - channel
+        - recipient
+        - title
+        - body
+      properties:
+        channel:
+          $ref: '#/components/schemas/NotificationChannel'
+        recipient:
+          type: string
+          description: Email, телефон или push token
+          example: "user@example.com"
+        title:
+          type: string
+          example: "Тестовое уведомление"
+        body:
+          type: string
+          example: "Проверка канала доставки уведомлений"
+
+    TestNotificationResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          example: "sent"
+        provider_message_id:
+          type: string
+          nullable: true
+          example: "smtp-msg-12345"
+
+    ReturnRequestStatus:
+      type: string
+      enum:
+        - PENDING
+        - APPROVED
+        - REJECTED
+        - COMPLETED
+      description: Статус заявки на возврат
+
+    CancelRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          maxLength: 500
+          description: Причина отмены (опционально)
+
+    CancelResponse:
+      type: object
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, reserved, reservation_failed, paid, payment_failed, preparing, shipping, delivered, completed, cancelled, refunded]
+        inventory_released:
+          type: boolean
+          description: |
+            true: Товары сразу стали доступны к покупке (CREATED, PAID, ASSEMBLING).
+            false: Товары будут доступны после физического возврата на склад (DELIVERING, DELIVERED).
+        refund_initiated:
+          type: boolean
+          description: Инициирован ли возврат денежных средств
+
+    ReturnRequestCreate:
+      type: object
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
+          description: Причина возврата из формы пользователя
+        comment:
+          type: string
+          description: Дополнительный комментарий
+        photos:
+          type: array
+          items:
+            type: string
+            format: uri
+          description: Ссылки на фото товара (опционально)
+
+    ReturnRequest:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/ReturnRequestStatus'
+        reason:
+          type: string
+        rejection_reason:
+          type: string
+          description: Причина отказа администратора (заполняется при REJECTED)
+        created_at:
+          type: string
+          format: date-time
+
+    ProductsReservedEvent:
+      type: object
+      required:
+        - event_id
+        - event_type
+        - occurred_at
+        - payload
+      properties:
+        event_id:
+          type: string
+          format: uuid
+        event_type:
+          type: string
+          enum:
+            - products.reserved
+        occurred_at:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          required:
+            - order_id
+            - items
+            - expires_at
+          properties:
+            order_id:
+              type: string
+              format: uuid
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/ReserveItem'
+            expires_at:
+              type: string
+              format: date-time
+
+    Product:
+      type: object
+      required: [id, name, price, category_id, is_active]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        description: {type: string}
+        price: {type: number, format: float}
+        old_price: {type: number, format: float, description: "Для отображения скидок"}
+        category_id: {type: string, format: uuid}
+        stock_quantity: {type: integer, minimum: 0}
+        image_urls:
+          type: array
+          items: {type: string, format: uri}
+        rating: {type: number, format: float, minimum: 0, maximum: 5}
+        is_active: {type: boolean}
+
+    ProductListResponse:
+      type: object
+      required: [total, items]
+      properties:
+        total: {type: integer, minimum: 0}
+        limit: {type: integer}
+        offset: {type: integer}
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/Product'}
+
+    CartItem:
+      type: object
+      required: [product_id, name, quantity, price]
+      properties:
+        product_id: {type: string, format: uuid}
+        name: {type: string}
+        quantity: {type: integer, minimum: 1}
+        price: {type: number, format: float}
+        image_url: {type: string, format: uri}
+
+    Cart:
+      type: object
+      required: [user_id, items, total_price]
+      properties:
+        user_id: {type: string, format: uuid}
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/CartItem'}
+        total_price: {type: number, format: float}
+
+    AddToCartRequest:
+      type: object
+      required: [product_id, quantity]
+      properties:
+        product_id: {type: string, format: uuid}
+        quantity: {type: integer, minimum: 1, default: 1}
+
+x-cron-jobs:
+  - name: reservation-expirer
+    schedule: "*/1 * * * *"
+
+    action: "Переводит RESERVED -> EXPIRED, вызывает release в warehouse, обновляет reserved_products/статус"
+
+x-postman-collection:
+  info:
+    name: "Order Checkout API (Екб Магазин)"
+    description: "Оформление заказа: доставка + оплата"
+    schema: "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+
+  variable:
+    - key: baseUrl
+      value: https://your-api.com/api
+    - key: orderId
+      value: order_123456
+
+  item:
+    - name: "1. Способы оплаты"
+      request:
+        method: GET
+        header:
+          - key: Content-Type
+            value: application/json
+        url:
+          raw: "{{baseUrl}}/payment-methods"
+          host:
+            - "{{baseUrl}}"
+          path:
+            - payment-methods
+
+    - name: "2. Пункты самовывоза"
+      request:
+        method: GET
+        header:
+          - key: Content-Type
+            value: application/json
+        url:
+          raw: "{{baseUrl}}/delivery-points"
+          host:
+            - "{{baseUrl}}"
+          path:
+            - delivery-points
+
+    - name: "3. Выбор доставки (Курьер)"
+      event:
+        - listen: test
+          script:
+            exec:
+              - "pm.test('Статус 200', () => {"
+              - "  pm.response.to.have.status(200);"
+              - "});"
+              - "const jsonData = pm.response.json();"
+              - "pm.collectionVariables.set('totalAmount', jsonData.totalAmount);"
+      request:
+        method: POST
+        header:
+          - key: Content-Type
+            value: application/json
+        body:
+          mode: raw
+          raw: |
+            {
+              "deliveryType": "courier",
+              "address": {
+                "street": "Ленина",
+                "house": "50",
+                "city": "Екб",
+                "postcode": "620000"
+              }
+            }
+        url:
+          raw: "{{baseUrl}}/orders/{{orderId}}/shipping"
+          host:
+            - "{{baseUrl}}"
+          path:
+            - orders
+            - "{{orderId}}"
+            - shipping
+
+    - name: "4. Выбор доставки (Самовывоз)"
+      request:
+        method: POST
+        header:
+          - key: Content-Type
+            value: application/json
+        body:
+          mode: raw
+          raw: |
+            {
+              "deliveryType": "pickup",
+              "pickupPointId": "point_1"
+            }
+        url:
+          raw: "{{baseUrl}}/orders/{{orderId}}/shipping"
+          host:
+            - "{{baseUrl}}"
+          path:
+            - orders
+            - "{{orderId}}"
+            - shipping
+
+    - name: "5. Инициировать оплату (Карта)"
+      event:
+        - listen: test
+          script:
+            exec:
+              - "pm.test('Получили ссылку на оплату', () => {"
+              - "  const jsonData = pm.response.json();"
+              - "  pm.expect(jsonData.paymentUrl).to.exist;"
+              - "  console.log('Оплатить по ссылке:', jsonData.paymentUrl);"
+              - "});"
+      request:
+        method: POST
+        header:
+          - key: Content-Type
+            value: application/json
+        body:
+          mode: raw
+          raw: |
+            {
+              "paymentMethod": "card",
+              "paymentGateway": "mock"
+            }
+        url:
+          raw: "{{baseUrl}}/orders/{{orderId}}/payment"
+          host:
+            - "{{baseUrl}}"
+          path:
+            - orders
+            - "{{orderId}}"
+            - payment
+
+    - name: "6. Подтвердить заказ"
+      request:
+        method: PUT
+        header:
+          - key: Content-Type
+            value: application/json
+        url:
+          raw: "{{baseUrl}}/orders/{{orderId}}/confirm"
+          host:
+            - "{{baseUrl}}"
+          path:
+            - orders
+            - "{{orderId}}"
+            - confirm
+
+
