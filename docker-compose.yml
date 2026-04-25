@@ -1,27 +1,77 @@
 services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: neomarket-postgres
+    environment:
+      POSTGRES_USER: neomarket
+      POSTGRES_PASSWORD: neomarket_dev_2026
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-databases.sql:/docker-entrypoint-initdb.d/init-databases.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U neomarket"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - neomarket-network
+
   b2b:
     build:
       context: .
       dockerfile: b2b/Dockerfile
     container_name: b2b
+    environment:
+      DATABASE_URL: postgresql+psycopg://neomarket:neomarket_dev_2026@postgres:5432/neomarket_b2b
     ports:
       - "8001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
+    networks:
+      - neomarket-network
 
   b2c:
     build:
       context: .
       dockerfile: b2c/Dockerfile
     container_name: b2c
+    environment:
+      DATABASE_URL: postgresql+psycopg://neomarket:neomarket_dev_2026@postgres:5432/neomarket_b2c
     ports:
       - "8002:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
+    networks:
+      - neomarket-network
 
   moderation:
     build:
       context: .
       dockerfile: moderation/Dockerfile
     container_name: moderation
+    environment:
+      DATABASE_URL: postgresql+psycopg://neomarket:neomarket_dev_2026@postgres:5432/neomarket_moderation
     ports:
       - "8003:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
+    networks:
+      - neomarket-network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  neomarket-network:
+    driver: bridge
