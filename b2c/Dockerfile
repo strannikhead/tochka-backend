@@ -15,7 +15,15 @@ COPY b2c/pyproject.toml ./b2c/
 
 RUN uv sync --frozen --package b2c-service --no-dev
 
+# Copy Alembic migrations
+COPY b2c/alembic.ini ./b2c/
+COPY b2c/alembic ./b2c/alembic
+
 COPY b2c/src ./b2c/src
 
+# Copy entrypoint script
+COPY b2c/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 EXPOSE 8000
-CMD ["uvicorn", "main:app", "--app-dir", "b2c/src", "--host", "0.0.0.0", "--port", "8000"]
+ENTRYPOINT ["/entrypoint.sh"]
