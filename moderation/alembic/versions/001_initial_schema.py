@@ -19,8 +19,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Create moderation_decision_type enum
-    op.execute("CREATE TYPE moderation_decision_type AS ENUM ('APPROVED', 'DECLINED')")
+    # Enum type will be created automatically by SQLAlchemy when creating the table
 
     # Create product_snapshots table
     op.create_table(

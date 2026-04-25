@@ -12,7 +12,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-databases.sql:/docker-entrypoint-initdb.d/init-databases.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U neomarket"]
+      test: ["CMD-SHELL", "pg_isready -U neomarket -d postgres"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -26,7 +26,7 @@ services:
       dockerfile: b2b/Dockerfile
     container_name: b2b
     environment:
-      DATABASE_URL: postgresql+psycopg://neomarket:neomarket_dev_2026@postgres:5432/neomarket_b2b
+      DATABASE_URL: postgresql://neomarket:neomarket_dev_2026@postgres:5432/neomarket_b2b
     ports:
       - "8001:8000"
     depends_on:
@@ -42,7 +42,7 @@ services:
       dockerfile: b2c/Dockerfile
     container_name: b2c
     environment:
-      DATABASE_URL: postgresql+psycopg://neomarket:neomarket_dev_2026@postgres:5432/neomarket_b2c
+      DATABASE_URL: postgresql://neomarket:neomarket_dev_2026@postgres:5432/neomarket_b2c
     ports:
       - "8002:8000"
     depends_on:
@@ -58,7 +58,7 @@ services:
       dockerfile: moderation/Dockerfile
     container_name: moderation
     environment:
-      DATABASE_URL: postgresql+psycopg://neomarket:neomarket_dev_2026@postgres:5432/neomarket_moderation
+      DATABASE_URL: postgresql://neomarket:neomarket_dev_2026@postgres:5432/neomarket_moderation
     ports:
       - "8003:8000"
     depends_on:
