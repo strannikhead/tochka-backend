@@ -26,10 +26,7 @@ jobs:
     name: Detect Changes
     runs-on: ubuntu-latest
     outputs:
-      b2b: ${{ steps.changes.outputs.b2b }}
-      b2c: ${{ steps.changes.outputs.b2c }}
-      moderation: ${{ steps.changes.outputs.moderation }}
-      shared: ${{ steps.changes.outputs.shared }}
+      active_services: ${{ steps.set-matrix.outputs.services }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -37,37 +34,42 @@ jobs:
           fetch-depth: 0
 
       - name: Detect changed services
-        id: changes
+        id: set-matrix
         run: |
+          SERVICES=()
           if [[ "${{ github.event_name }}" == "push" && ("${{ github.ref }}" == "refs/heads/main" || "${{ github.ref }}" == "refs/heads/master") ]]; then
-            echo "b2b=true" >> $GITHUB_OUTPUT
-            echo "b2c=true" >> $GITHUB_OUTPUT
-            echo "moderation=true" >> $GITHUB_OUTPUT
-            echo "shared=true" >> $GITHUB_OUTPUT
+            SERVICES=("b2b" "b2c" "moderation" "shared")
           else
-            git diff --name-only origin/main...HEAD > /tmp/changed_files.txt 2>/dev/null || git diff --name-only HEAD~1...HEAD > /tmp/changed_files.txt 2>/dev/null || echo "" > /tmp/changed_files.txt
+            BASE_SHA="${{ github.event.pull_request.base.sha || 'origin/main' }}"
+            git diff --name-only $BASE_SHA...HEAD > /tmp/changed_files.txt 2>/dev/null || git diff --name-only HEAD~1...HEAD > /tmp/changed_files.txt 2>/dev/null || echo "" > /tmp/changed_files.txt
 
-            echo "b2b=$(grep -q '^b2b/' /tmp/changed_files.txt && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
-            echo "b2c=$(grep -q '^b2c/' /tmp/changed_files.txt && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
-            echo "moderation=$(grep -q '^moderation/' /tmp/changed_files.txt && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
-            echo "shared=$(grep -q '^shared/' /tmp/changed_files.txt && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+            for s in b2b b2c moderation shared; do
+              if grep -q "^$s/" /tmp/changed_files.txt; then
+                SERVICES+=("\"$s\"")
+              fi
+            done
+          fi
+
+          if [ ${#SERVICES[@]} -eq 0 ]; then
+            echo "services=[]" >> $GITHUB_OUTPUT
+          else
+            JSON_ARRAY="[$(IFS=,; echo "${SERVICES[*]}" | sed 's/\"\"/\",\"/g')]"
+            # Ensure proper JSON formatting for strings if not already quoted
+            if [[ ! $JSON_ARRAY =~ \" ]]; then
+               JSON_ARRAY=$(echo $JSON_ARRAY | sed 's/\([^][,]\+\)/"\1"/g')
+            fi
+            echo "services=$JSON_ARRAY" >> $GITHUB_OUTPUT
           fi
 
   lint:
     name: Lint (${{ matrix.service }})
     runs-on: ubuntu-latest
     needs: detect-changes
+    if: needs.detect-changes.outputs.active_services != '[]'
     strategy:
       matrix:
-        service: [b2b, b2c, moderation, shared]
+        service: ${{ fromJson(needs.detect-changes.outputs.active_services) }}
       fail-fast: false
-    if: |
-      always() && (
-        (matrix.service == 'b2b' && needs.detect-changes.outputs.b2b == 'true') ||
-        (matrix.service == 'b2c' && needs.detect-changes.outputs.b2c == 'true') ||
-        (matrix.service == 'moderation' && needs.detect-changes.outputs.moderation == 'true') ||
-        (matrix.service == 'shared' && needs.detect-changes.outputs.shared == 'true')
-      )
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -80,7 +82,6 @@ jobs:
 
       - name: Run ruff lint
         run: |
-          # Используем uv run для запуска без предварительной ручной установки ruff
           uv run ruff check ${{ matrix.service }}/src --output-format=json > /tmp/ruff-output.json || true
           uv run ruff check ${{ matrix.service }}/src --output-format=github
           exit 0
@@ -89,17 +90,11 @@ jobs:
     name: SAST (${{ matrix.service }})
     runs-on: ubuntu-latest
     needs: [detect-changes, lint]
+    if: always() && needs.detect-changes.outputs.active_services != '[]' && (needs.lint.result == 'success' || needs.lint.result == 'skipped')
     strategy:
       matrix:
-        service: [b2b, b2c, moderation, shared]
+        service: ${{ fromJson(needs.detect-changes.outputs.active_services) }}
       fail-fast: false
-    if: |
-      always() && (
-        (matrix.service == 'b2b' && needs.detect-changes.outputs.b2b == 'true') ||
-        (matrix.service == 'b2c' && needs.detect-changes.outputs.b2c == 'true') ||
-        (matrix.service == 'moderation' && needs.detect-changes.outputs.moderation == 'true') ||
-        (matrix.service == 'shared' && needs.detect-changes.outputs.shared == 'true')
-      )
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -119,17 +114,11 @@ jobs:
     name: Tests (${{ matrix.service }})
     runs-on: ubuntu-latest
     needs: [detect-changes, lint, sast]
+    if: always() && needs.detect-changes.outputs.active_services != '[]' && (needs.sast.result == 'success' || needs.sast.result == 'skipped')
     strategy:
       matrix:
-        service: [b2b, b2c, moderation, shared]
+        service: ${{ fromJson(needs.detect-changes.outputs.active_services) }}
       fail-fast: false
-    if: |
-      always() && (
-        (matrix.service == 'b2b' && needs.detect-changes.outputs.b2b == 'true') ||
-        (matrix.service == 'b2c' && needs.detect-changes.outputs.b2c == 'true') ||
-        (matrix.service == 'moderation' && needs.detect-changes.outputs.moderation == 'true') ||
-        (matrix.service == 'shared' && needs.detect-changes.outputs.shared == 'true')
-      )
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
