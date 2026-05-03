@@ -22,8 +22,7 @@ target_metadata = Base.metadata
 
 # Database URL from environment variable
 DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+psycopg://neomarket:neomarket_dev_2026@localhost:5432/neomarket_b2c"
+    "DATABASE_URL", "postgresql+psycopg://neomarket:neomarket_dev_2026@localhost:5432/neomarket_b2c"
 )
 
 
