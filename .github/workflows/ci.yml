@@ -136,7 +136,7 @@ jobs:
         run: |
           uv run pytest ${{ matrix.service }}/tests \
             --cov=${{ matrix.service }}/src \
-            --cov-report=term-summary \
+            --cov-report=term \
             --cov-report=json:/tmp/coverage-${{ matrix.service }}.json \
             -v
         continue-on-error: true
