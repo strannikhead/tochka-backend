@@ -17,8 +17,16 @@ COPY b2b/pyproject.toml ./b2b/
 # Install deps + shared into /app/.venv
 RUN uv sync --frozen --package b2b-service --no-dev
 
+# Copy Alembic migrations
+COPY b2b/alembic.ini ./b2b/
+COPY b2b/alembic ./b2b/alembic
+
 # Service code last for better layer caching
 COPY b2b/src ./b2b/src
 
+# Copy entrypoint script
+COPY b2b/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 EXPOSE 8000
-CMD ["uvicorn", "main:app", "--app-dir", "b2b/src", "--host", "0.0.0.0", "--port", "8000"]
+ENTRYPOINT ["/entrypoint.sh"]

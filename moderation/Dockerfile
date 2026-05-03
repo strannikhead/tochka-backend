@@ -15,7 +15,15 @@ COPY moderation/pyproject.toml ./moderation/
 
 RUN uv sync --frozen --package moderation-service --no-dev
 
+# Copy Alembic migrations
+COPY moderation/alembic.ini ./moderation/
+COPY moderation/alembic ./moderation/alembic
+
 COPY moderation/src ./moderation/src
 
+# Copy entrypoint script
+COPY moderation/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 EXPOSE 8000
-CMD ["uvicorn", "main:app", "--app-dir", "moderation/src", "--host", "0.0.0.0", "--port", "8000"]
+ENTRYPOINT ["/entrypoint.sh"]

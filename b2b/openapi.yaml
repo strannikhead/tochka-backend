@@ -1,147 +1,836 @@
 openapi: 3.0.3
 info:
   title: NeoMarket B2B (Seller Cabinet)
-  version: "1.0"
+  version: 0.1.0
   description: |
     Кабинет продавца. Создание товаров, SKU, управление ценами, накладные.
     Связи с Moderation и B2C — частично восстановлены, детали проектируются.
 
 paths:
-  /api/v1/products:
-    post:
-      summary: Создать товар
-      tags: [Products]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              # Формат тела запроса — проектируется
-      responses:
-        "201":
-          description: Товар создан
-
-  /api/v1/products/{id}:
+  /api/v1/categories/:
     get:
-      summary: Получить товар со всеми SKU
-      tags: [Products]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
+      tags: [Categories]
+      summary: Получить все категории
       responses:
         "200":
-          description: Товар с SKU, характеристиками и фото
+          description: Список всех категорий
           content:
             application/json:
               schema:
-                $ref: "../shared/schemas.yaml#/components/schemas/Product"
-              example:
-                id: 42
-                title: "iPhone 15 Pro Max"
-                description: "Флагман Apple..."
-                status: "MODERATED"
-                category:
-                  id: 3
-                  name: "Смартфоны"
-                images:
-                  - url: "/s3/iphone15-1.jpg"
-                    ordering: 0
-                characteristics:
-                  - name: "Бренд"
-                    value: "Apple"
-                skus:
-                  - id: 101
-                    name: "256GB Black"
-                    price: 12999000
-                    activeQuantity: 5
-                    characteristics:
-                      - name: "Цвет"
-                        value: "Чёрный"
-                      - name: "Объём памяти"
-                        value: "256 ГБ"
-                  - id: 102
-                    name: "256GB White"
-                    price: 12999000
-                    activeQuantity: 0
-        "404":
-          description: Товар не найден
-
+                items:
+                  $ref: '#/components/schemas/CategoryResponse'
+                type: array
+    post:
+      tags: [Categories]
+      summary: Создать категорию
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CategoryCreate'
+        required: true
+      responses:
+        "201":
+          description: Категория создана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategoryResponse'
+        "422":
+          description: Ошибка Валидации
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/categories/{category_id}:
     put:
-      summary: Изменить товар
-      tags: [Products]
+      tags: [Categories]
+      summary: Изменить категорию
       parameters:
-        - name: id
+        - name: category_id
           in: path
           required: true
           schema:
-            type: integer
+            type: string
+            format: uuid
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
+              $ref: '#/components/schemas/CategoryUpdate'
       responses:
         "200":
-          description: Товар обновлён
-
-  /api/v1/skus:
+          description: Категория изменена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategoryResponse'
+        "422":
+          description: Ошибка Валидации
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/products/:
+    get:
+      tags: [Products]
+      summary: Получить список всех товаров с пагинацией
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 10
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Страница из списка всех товаров
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedProductResponse'
+        "422":
+          description: Ошибка Валидации
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
     post:
-      summary: Создать SKU
-      tags: [SKU]
+      tags: [Products]
+      summary: Создать товар
+      operationId: create_product_api_v1_products__post
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
+              $ref: '#/components/schemas/ProductCreate'
+      responses:
+        "201":
+          description: Товар создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+        "422":
+          description: Ошибка Валидации
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/products/{product_id}:
+    get:
+      tags: [Products]
+      summary: Получить товар по ID
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Товар с SKU
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+        "422":
+          description: Ошибка Валидации
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      tags: [Products]
+      summary: Изменить товар
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductUpdate'
+      responses:
+        "200":
+          description: Товар изменён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+        "422":
+          description: Ошибка Валидации
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/skus/:
+    post:
+      tags: [SKU]
+      summary: Создать SKU
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SKUCreate'
+        required: true
       responses:
         "201":
           description: SKU создан
-
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SKUResponse'
+        "422":
+          description: Ошибка Валидации
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/skus/{sku_id}:
     put:
-      summary: Изменить SKU
       tags: [SKU]
+      summary: Изменить SKU
+      parameters:
+        - name: sku_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
+              $ref: '#/components/schemas/SKUUpdate'
       responses:
         "200":
-          description: SKU обновлён
-
-  /api/v1/invoices:
+          description: SKU изменён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SKUResponse'
+        "422":
+          description: Ошибка Валидации
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/images/upload:
     post:
-      summary: Создать накладную
-      tags: [Invoices]
+      tags: [Images]
+      summary: Загрузить изображение
+      description: Загрузить изображение в S3 и получить URL.
       requestBody:
-        required: true
         content:
-          application/json:
+          multipart/form-data:
             schema:
-              type: object
-      responses:
-        "201":
-          description: Накладная создана
-
-  /api/v1/invoices/accept:
-    post:
-      summary: Принять накладную (склад)
-      tags: [Invoices]
-      requestBody:
+              $ref: '#/components/schemas/ImageUpload'
         required: true
-        content:
-          application/json:
-            schema:
-              type: object
       responses:
         "200":
-          description: Накладная принята, остатки обновлены
-
-  # ??? — Эндпоинты для B2C (каталог, резервирование) — проектируются
+          description: Изображение загружено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImageUploadResponse'
+        "422":
+          description: Ошибка Валидации
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+components:
+  schemas:
+    ImageUploadResponse:
+      type: object
+      properties:
+        url:
+          type: string
+          title: Url
+          example: "/s3/427092e9-680c-4dd5-b70a-8b3d652470c1.jpg"
+      required:
+        - url
+      title: ImageUploadResponse
+    ImageUpload:
+      properties:
+        file:
+          type: string
+          format: binary
+          title: File
+      type: object
+      required:
+        - file
+      title: ImageUpload
+    CategoryCreate:
+      properties:
+        name:
+          type: string
+          title: Name
+        parent_id:
+          anyOf:
+            - type: string
+              format: uuid
+          title: Parent Id
+      type: object
+      required:
+        - name
+      title: CategoryCreate
+      example:
+        name: Смартфоны
+        parent_id: 0381c08d-7e85-4fd9-9549-d5422c8efe50
+    CategoryRef:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        name:
+          type: string
+          title: Name
+        level:
+          type: integer
+          title: Level
+        path:
+          type: string
+          title: Path
+      type: object
+      required:
+        - id
+        - name
+        - level
+        - path
+      title: CategoryRef
+      example:
+        id: 2080869e-300a-46bd-966f-7064a60ea982
+        name: Iphone
+        level: 2
+        path: 0381c08d-7e85-4fd9-9549-d5422c8efe50.5d5c8bbb-f463-4f92-82a6-0d97de0eb675.2080869e-300a-46bd-966f-7064a60ea982
+    CategoryResponse:
+      properties:
+        name:
+          type: string
+          title: Name
+        id:
+          type: string
+          format: uuid
+          title: Id
+        level:
+          type: integer
+          title: Level
+        path:
+          type: string
+          title: Path
+        is_active:
+          type: boolean
+          title: Is Active
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+        - name
+        - id
+        - level
+        - path
+        - is_active
+        - created_at
+        - updated_at
+      title: CategoryResponse
+      example:
+        name: Смартфоны
+        id: 5d5c8bbb-f463-4f92-82a6-0d97de0eb675
+        level: 1
+        path: 0381c08d-7e85-4fd9-9549-d5422c8efe50.5d5c8bbb-f463-4f92-82a6-0d97de0eb675
+        is_active: true
+        created_at: 2026-04-03T06:53:18.344181
+        updated_at: 2026-04-03T06:53:18.344181
+    CategoryUpdate:
+      properties:
+        name:
+          anyOf:
+            - type: string
+          title: Name
+        is_active:
+          anyOf:
+            - type: boolean
+          title: Is Active
+      type: object
+      title: CategoryUpdate
+      example:
+        name: Смартфоны
+        is_active: true
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    Image:
+      properties:
+        url:
+          type: string
+          title: Url
+        ordering:
+          type: integer
+          title: Ordering
+      type: object
+      required:
+        - url
+        - ordering
+      title: Image
+      example:
+        url: /s3/427092e9-680c-4dd5-b70a-8b3d652470c1.jpg
+        ordering: 0
+    PaginatedProductResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ProductResponse'
+          type: array
+          title: Items
+        total:
+          type: integer
+          title: Total
+        limit:
+          type: integer
+          title: Limit
+        offset:
+          type: integer
+          title: Offset
+      type: object
+      required:
+        - items
+        - total
+        - limit
+        - offset
+      title: PaginatedProductResponse
+      example:
+        items:
+          - title: Iphone 15 Pro
+            description: Флагман Apple...
+            status: CREATED
+            images:
+              - url: /s3/427092e9-680c-4dd5-b70a-8b3d652470c1.jpg
+                ordering: 0
+            characteristics:
+              - name: Бренд
+                value: Apple
+            id: b26fc63e-573b-4ed2-983a-2dbcfb597761
+            created_at: 2026-04-03T07:02:46.865655
+            updated_at: 2026-04-03T07:02:46.865655
+            category:
+              id: 2080869e-300a-46bd-966f-7064a60ea982
+              name: Iphone
+              level: 2
+              path: 0381c08d-7e85-4fd9-9549-d5422c8efe50.5d5c8bbb-f463-4f92-82a6-0d97de0eb675.2080869e-300a-46bd-966f-7064a60ea982
+            skus:
+              - name: 256 Black
+                price: 89990
+                active_quantity: 3
+                images:
+                  - url: /s3/451a3d11-996f-49ba-8f6f-748dc1f7ce4c.jpg
+                    ordering: 0
+                characteristics:
+                  - name: Цвет
+                    value: Чёрный
+                  - name: Объём памяти
+                    value: 256 ГБ
+                product_id: b26fc63e-573b-4ed2-983a-2dbcfb597761
+                id: b2e217d3-8cfd-49c4-84bd-a43696d4496a
+                created_at: 2026-04-03T07:16:28.258993
+                updated_at: 2026-04-03T07:16:28.258993
+        total: 1
+        limit: 10
+        offset: 0
+    ProductCreate:
+      properties:
+        title:
+          type: string
+          title: Title
+        description:
+          anyOf:
+            - type: string
+          title: Description
+        images:
+          items:
+            $ref: '#/components/schemas/Image'
+          type: array
+          title: Images
+          default: []
+        characteristics:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Characteristics
+          default: []
+        category_id:
+          type: string
+          format: uuid
+          title: Category Id
+      type: object
+      required:
+        - title
+        - category_id
+      title: ProductCreate
+      example:
+        title: Iphone 15 Pro
+        description: Флагман Apple...
+        images:
+          - url: /s3/427092e9-680c-4dd5-b70a-8b3d652470c1.jpg
+            ordering: 0
+        characteristics:
+          - name: Бренд
+            value: Apple
+        category_id: 2080869e-300a-46bd-966f-7064a60ea982
+    ProductResponse:
+      properties:
+        title:
+          type: string
+          title: Title
+        description:
+          anyOf:
+            - type: string
+          title: Description
+        status:
+          allOf:
+            - $ref: "#/components/schemas/ProductStatus"
+          default: CREATED
+        images:
+          items:
+            $ref: '#/components/schemas/Image'
+          type: array
+          title: Images
+          default: []
+        characteristics:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Characteristics
+          default: []
+        id:
+          type: string
+          format: uuid
+          title: Id
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        category:
+          $ref: '#/components/schemas/CategoryRef'
+        skus:
+          items:
+            $ref: '#/components/schemas/SKUResponse'
+          type: array
+          title: Skus
+      type: object
+      required:
+        - title
+        - id
+        - created_at
+        - updated_at
+        - category
+        - skus
+      title: ProductResponse
+      example:
+        title: Iphone 15 Pro
+        description: Флагман Apple...
+        status: CREATED
+        images:
+          - url: /s3/427092e9-680c-4dd5-b70a-8b3d652470c1.jpg
+            ordering: 0
+        characteristics:
+          - name: Бренд
+            value: Apple
+        id: b26fc63e-573b-4ed2-983a-2dbcfb597761
+        created_at: 2026-04-03T07:02:46.865655
+        updated_at: 2026-04-03T07:02:46.865655
+        category:
+          id: 2080869e-300a-46bd-966f-7064a60ea982
+          name: Iphone
+          level: 2
+          path: 0381c08d-7e85-4fd9-9549-d5422c8efe50.5d5c8bbb-f463-4f92-82a6-0d97de0eb675.2080869e-300a-46bd-966f-7064a60ea982
+        skus:
+          - name: 256 Black
+            price: 89990
+            active_quantity: 3
+            images:
+              - url: /s3/451a3d11-996f-49ba-8f6f-748dc1f7ce4c.jpg
+                ordering: 0
+            characteristics:
+              - name: Цвет
+                value: Чёрный
+              - name: Объём памяти
+                value: 256 ГБ
+            product_id: b26fc63e-573b-4ed2-983a-2dbcfb597761
+            id: b2e217d3-8cfd-49c4-84bd-a43696d4496a
+            created_at: 2026-04-03T07:16:28.258993
+            updated_at: 2026-04-03T07:16:28.258993
+    ProductStatus:
+      type: string
+      enum:
+        - CREATED
+        - ON_MODERATION
+        - MODERATED
+        - BLOCKED
+        - DELETED
+      title: ProductStatus
+      example: CREATED
+    ProductUpdate:
+      properties:
+        title:
+          type: string
+          title: Title
+        description:
+          anyOf:
+            - type: string
+          title: Description
+        images:
+          items:
+            $ref: '#/components/schemas/Image'
+          type: array
+          title: Images
+          default: []
+        characteristics:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Characteristics
+          default: []
+        category_id:
+          type: string
+          format: uuid
+          title: Category Id
+      type: object
+      required:
+        - title
+        - category_id
+      title: ProductUpdate
+      example:
+        title: Iphone 15 Pro
+        description: Флагман Apple...
+        images:
+          - url: /s3/427092e9-680c-4dd5-b70a-8b3d652470c1.jpg
+            ordering: 0
+        characteristics:
+          - name: Бренд
+            value: Apple
+        category_id: 2080869e-300a-46bd-966f-7064a60ea982
+    SKUCreate:
+      properties:
+        name:
+          type: string
+          title: Name
+        price:
+          type: integer
+          title: Price
+        active_quantity:
+          type: integer
+          title: Active Quantity
+          default: 0
+        images:
+          items:
+            $ref: '#/components/schemas/Image'
+          type: array
+          title: Images
+          default: []
+        characteristics:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Characteristics
+          default: []
+        product_id:
+          type: string
+          format: uuid
+          title: Product Id
+      type: object
+      required:
+        - name
+        - price
+        - product_id
+      title: SKUCreate
+      example:
+        name: 256 Black
+        price: 89990
+        active_quantity: 3
+        images:
+          - url: /s3/451a3d11-996f-49ba-8f6f-748dc1f7ce4c.jpg
+            ordering: 0
+        characteristics:
+          - name: Цвет
+            value: Чёрный
+          - name: Объём памяти
+            value: 256 ГБ
+        product_id: b26fc63e-573b-4ed2-983a-2dbcfb597761
+    SKUResponse:
+      properties:
+        name:
+          type: string
+          title: Name
+        price:
+          type: integer
+          title: Price
+        active_quantity:
+          type: integer
+          title: Active Quantity
+          default: 0
+        images:
+          items:
+            $ref: '#/components/schemas/Image'
+          type: array
+          title: Images
+          default: []
+        characteristics:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Characteristics
+          default: []
+        product_id:
+          type: string
+          format: uuid
+          title: Product Id
+        id:
+          type: string
+          format: uuid
+          title: Id
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+        - name
+        - price
+        - product_id
+        - id
+        - created_at
+        - updated_at
+      title: SKUResponse
+      example:
+        name: 256 Black
+        price: 89990
+        active_quantity: 3
+        images:
+          - url: /s3/451a3d11-996f-49ba-8f6f-748dc1f7ce4c.jpg
+            ordering: 0
+        characteristics:
+          - name: Цвет
+            value: Чёрный
+          - name: Объём памяти
+            value: 256 ГБ
+        product_id: b26fc63e-573b-4ed2-983a-2dbcfb597761
+        id: b2e217d3-8cfd-49c4-84bd-a43696d4496a
+        created_at: 2026-04-03T07:16:28.258993
+        updated_at: 2026-04-03T07:16:28.258993
+    SKUUpdate:
+      properties:
+        name:
+          type: string
+          title: Name
+        price:
+          type: integer
+          title: Price
+        active_quantity:
+          type: integer
+          title: Active Quantity
+        images:
+          items:
+            $ref: '#/components/schemas/Image'
+          type: array
+          title: Images
+          default: []
+        characteristics:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Characteristics
+          default: []
+        product_id:
+          type: string
+          format: uuid
+          title: Product Id
+      type: object
+      required:
+        - name
+        - price
+        - active_quantity
+        - product_id
+      title: SKUUpdate
+      example:
+        name: 256 Black
+        price: 89990
+        active_quantity: 3
+        images:
+          - url: /s3/451a3d11-996f-49ba-8f6f-748dc1f7ce4c.jpg
+            ordering: 0
+        characteristics:
+          - name: Цвет
+            value: Чёрный
+          - name: Объём памяти
+            value: 256 ГБ
+        product_id: b26fc63e-573b-4ed2-983a-2dbcfb597761
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+              - type: string
+              - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+        - loc
+        - msg
+        - type
+      title: ValidationError

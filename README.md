@@ -158,6 +158,18 @@ B2C обращается к B2B за актуальными ценами и ос
 
 ### Локально
 
+### Установить uv (если еще не установлен)
+
+```bash
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# или через Homebrew
+brew install uv
+```
+
+### Установить зависимости проекта
+
 ```bash
 # uv сам установит Python 3.14, если нужно
 uv sync --all-packages
@@ -176,19 +188,46 @@ uv run uvicorn main:app --app-dir moderation/src --reload --port 8003
 
 Swagger UI — `/docs`, OpenAPI JSON — `/openapi.json`.
 
-### Docker Compose
+## База данных
+
+Проект использует **PostgreSQL 18** с тремя отдельными базами данных:
+- `neomarket_b2b` — категории, товары, SKU
+- `neomarket_b2c` — пользователи, корзина, заказы, избранное
+- `neomarket_moderation` — снимки товаров, модерация
+
+**Миграции:** Alembic, применяются автоматически при запуске сервиса в Docker.
+
+Подробности: см. [DATABASE.md](./DATABASE.md)
+
+## Запуск в Docker
+
+### Вариант 1: Только база данных
+
+```bash
+docker compose -f docker-compose.db.yml up -d
+```
+
+PostgreSQL доступна на `localhost:5432` (user: `neomarket`, password: `neomarket_dev_2026`)
+
+### Вариант 2: Все сервисы + БД
 
 ```bash
 docker compose up --build
 ```
 
-| Сервис | URL | База данных |
-|--------|-----|-------------|
-| B2B | http://localhost:8001 | `neomarket_b2b` |
-| B2C | http://localhost:8002 | `neomarket_b2c` |
-| Moderation | http://localhost:8003 | `neomarket_moderation` |
+| Сервис     | URL                   |
+|------------|-----------------------|
+| postgres   | localhost:5432        |
+| b2b        | http://localhost:8001 |
+| b2c        | http://localhost:8002 |
+| moderation | http://localhost:8003 |
 
----
+**Миграции применяются автоматически!** Каждый сервис при старте:
+1. Ждет готовности PostgreSQL
+2. Запускает `alembic upgrade head`
+3. Стартует приложение
+
+**Как устроены образы:** каждый Dockerfile тянет только свои файлы (`<service>/pyproject.toml` + `<service>/src` + `shared/` + корневой `uv.lock`), делает `uv sync --frozen --package <name> --no-dev` в `/app/.venv`, запускает `uvicorn` через entrypoint script. Манифесты других сервисов в образ не попадают.
 
 ## Разработка
 
