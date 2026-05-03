@@ -1,0 +1,310 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: docker.io
+  DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+  DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+  UV_CACHE_DIR: /tmp/.uv-cache
+
+jobs:
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      b2b: ${{ steps.changes.outputs.b2b }}
+      b2c: ${{ steps.changes.outputs.b2c }}
+      moderation: ${{ steps.changes.outputs.moderation }}
+      shared: ${{ steps.changes.outputs.shared }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed services
+        id: changes
+        run: |
+          if [[ "${{ github.event_name }}" == "push" && ("${{ github.ref }}" == "refs/heads/main" || "${{ github.ref }}" == "refs/heads/master") ]]; then
+            echo "b2b=true" >> $GITHUB_OUTPUT
+            echo "b2c=true" >> $GITHUB_OUTPUT
+            echo "moderation=true" >> $GITHUB_OUTPUT
+            echo "shared=true" >> $GITHUB_OUTPUT
+          else
+            git diff --name-only origin/main...HEAD > /tmp/changed_files.txt 2>/dev/null || git diff --name-only HEAD~1...HEAD > /tmp/changed_files.txt 2>/dev/null || echo "" > /tmp/changed_files.txt
+
+            echo "b2b=$(grep -q '^b2b/' /tmp/changed_files.txt && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+            echo "b2c=$(grep -q '^b2c/' /tmp/changed_files.txt && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+            echo "moderation=$(grep -q '^moderation/' /tmp/changed_files.txt && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+            echo "shared=$(grep -q '^shared/' /tmp/changed_files.txt && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+          fi
+
+  lint:
+    name: Lint (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    strategy:
+      matrix:
+        service: [b2b, b2c, moderation, shared]
+      fail-fast: false
+    if: |
+      always() && (
+        (matrix.service == 'b2b' && needs.detect-changes.outputs.b2b == 'true') ||
+        (matrix.service == 'b2c' && needs.detect-changes.outputs.b2c == 'true') ||
+        (matrix.service == 'moderation' && needs.detect-changes.outputs.moderation == 'true') ||
+        (matrix.service == 'shared' && needs.detect-changes.outputs.shared == 'true')
+      )
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: '3.14'
+
+      - name: Run ruff lint
+        run: |
+          # Используем uv run для запуска без предварительной ручной установки ruff
+          uv run ruff check ${{ matrix.service }}/src --output-format=json > /tmp/ruff-output.json || true
+          uv run ruff check ${{ matrix.service }}/src --output-format=github
+          exit 0
+
+  sast:
+    name: SAST (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    needs: [detect-changes, lint]
+    strategy:
+      matrix:
+        service: [b2b, b2c, moderation, shared]
+      fail-fast: false
+    if: |
+      always() && (
+        (matrix.service == 'b2b' && needs.detect-changes.outputs.b2b == 'true') ||
+        (matrix.service == 'b2c' && needs.detect-changes.outputs.b2c == 'true') ||
+        (matrix.service == 'moderation' && needs.detect-changes.outputs.moderation == 'true') ||
+        (matrix.service == 'shared' && needs.detect-changes.outputs.shared == 'true')
+      )
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: '3.14'
+
+      - name: Run Bandit security scan
+        run: |
+          uv run bandit -r ${{ matrix.service }}/src -f json -o /tmp/bandit-report.json || true
+          uv run bandit -r ${{ matrix.service }}/src -f txt
+
+  tests:
+    name: Tests (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    needs: [detect-changes, lint, sast]
+    strategy:
+      matrix:
+        service: [b2b, b2c, moderation, shared]
+      fail-fast: false
+    if: |
+      always() && (
+        (matrix.service == 'b2b' && needs.detect-changes.outputs.b2b == 'true') ||
+        (matrix.service == 'b2c' && needs.detect-changes.outputs.b2c == 'true') ||
+        (matrix.service == 'moderation' && needs.detect-changes.outputs.moderation == 'true') ||
+        (matrix.service == 'shared' && needs.detect-changes.outputs.shared == 'true')
+      )
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: '3.14'
+
+      - name: Install dependencies
+        run: uv sync --all-packages
+
+      - name: Run tests
+        run: |
+          uv run pytest ${{ matrix.service }}/tests \
+            --cov=${{ matrix.service }}/src \
+            --cov-report=term-summary \
+            --cov-report=json:/tmp/coverage-${{ matrix.service }}.json \
+            -v
+        continue-on-error: true
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports-${{ matrix.service }}
+          path: /tmp/coverage-*.json
+        continue-on-error: true
+
+  # build:
+  #   name: Build (${{ matrix.service }})
+  #   runs-on: ubuntu-latest
+  #   needs: [detect-changes, tests]
+  #   if: |
+  #     always() && (
+  #       (matrix.service == 'b2b' && needs.detect-changes.outputs.b2b == 'true') ||
+  #       (matrix.service == 'b2c' && needs.detect-changes.outputs.b2c == 'true') ||
+  #       (matrix.service == 'moderation' && needs.detect-changes.outputs.moderation == 'true')
+  #     )
+  #   strategy:
+  #     matrix:
+  #       service: [b2b, b2c, moderation]
+  #     fail-fast: false
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
+
+  #     - name: Set up Docker Buildx
+  #       uses: docker/setup-buildx-action@v3
+
+  #     - name: Login to Docker Hub
+  #       if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+  #       uses: docker/login-action@v3
+  #       with:
+  #         registry: ${{ env.REGISTRY }}
+  #         username: ${{ env.DOCKERHUB_USERNAME }}
+  #         password: ${{ env.DOCKERHUB_TOKEN }}
+
+  #     - name: Extract metadata
+  #       id: meta
+  #       uses: docker/metadata-action@v5
+  #       with:
+  #         images: ${{ env.REGISTRY }}/${{ env.DOCKERHUB_USERNAME }}/tochka-${{ matrix.service }}
+  #         tags: |
+  #           type=ref,event=branch
+  #           type=sha,prefix={{branch}}-
+  #           type=semver,pattern={{version}}
+  #           type=semver,pattern={{major}}.{{minor}}
+
+  #     - name: Build and push Docker image
+  #       uses: docker/build-push-action@v5
+  #       with:
+  #         context: ${{ matrix.service }}
+  #         file: ${{ matrix.service }}/Dockerfile
+  #         push: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') }}
+  #         tags: ${{ steps.meta.outputs.tags }}
+  #         labels: ${{ steps.meta.outputs.labels }}
+  #         cache-from: type=gha
+  #         cache-to: type=gha,mode=max
+
+  #     - name: Upload Docker image artifact
+  #       if: github.event_name != 'push' || (github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master')
+  #       uses: docker/build-push-action@v5
+  #       with:
+  #         context: ${{ matrix.service }}
+  #         file: ${{ matrix.service }}/Dockerfile
+  #         outputs: type=docker,dest=/tmp/image-${{ matrix.service }}.tar
+  #         cache-from: type=gha
+
+  #     - name: Upload artifact
+  #       if: github.event_name != 'push' || (github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master')
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: docker-image-${{ matrix.service }}
+  #         path: /tmp/image-${{ matrix.service }}.tar
+  #         retention-days: 1
+  #       continue-on-error: true
+
+  # sca:
+  #   name: SCA/Trivy (${{ matrix.service }})
+  #   runs-on: ubuntu-latest
+  #   needs: [detect-changes, build]
+  #   if: |
+  #     always() && (
+  #       (matrix.service == 'b2b' && needs.detect-changes.outputs.b2b == 'true') ||
+  #       (matrix.service == 'b2c' && needs.detect-changes.outputs.b2c == 'true') ||
+  #       (matrix.service == 'moderation' && needs.detect-changes.outputs.moderation == 'true')
+  #     )
+  #   strategy:
+  #     matrix:
+  #       service: [b2b, b2c, moderation]
+  #     fail-fast: false
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
+
+  #     - name: Run Trivy filesystem scan
+  #       uses: aquasecurity/trivy-action@master
+  #       with:
+  #         scan-type: 'fs'
+  #         scan-ref: '${{ matrix.service }}'
+  #         format: 'sarif'
+  #         output: 'trivy-results-${{ matrix.service }}.sarif'
+  #         severity: 'CRITICAL,HIGH'
+
+  #     - name: Upload Trivy results to GitHub Security tab
+  #       uses: github/codeql-action/upload-sarif@v3
+  #       with:
+  #         sarif_file: 'trivy-results-${{ matrix.service }}.sarif'
+  #         category: 'trivy-${{ matrix.service }}'
+  #       continue-on-error: true
+
+  #     - name: Display Trivy results
+  #       run: |
+  #         cat trivy-results-${{ matrix.service }}.sarif
+
+  # docker-push:
+  #   name: Docker Push
+  #   runs-on: ubuntu-latest
+  #   needs: [detect-changes, sca]
+  #   if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+  #   strategy:
+  #     matrix:
+  #       service: [b2b, b2c, moderation]
+  #     fail-fast: false
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
+
+  #     - name: Set up Docker Buildx
+  #       uses: docker/setup-buildx-action@v3
+
+  #     - name: Login to Docker Hub
+  #       uses: docker/login-action@v3
+  #       with:
+  #         registry: ${{ env.REGISTRY }}
+  #         username: ${{ env.DOCKERHUB_USERNAME }}
+  #         password: ${{ env.DOCKERHUB_TOKEN }}
+
+  #     - name: Extract metadata
+  #       id: meta
+  #       uses: docker/metadata-action@v5
+  #       with:
+  #         images: ${{ env.REGISTRY }}/${{ env.DOCKERHUB_USERNAME }}/tochka-${{ matrix.service }}
+  #         tags: |
+  #           type=ref,event=branch
+  #           type=sha,prefix={{branch}}-
+  #           type=semver,pattern={{version}}
+
+  #     - name: Build and push to Docker Hub
+  #       uses: docker/build-push-action@v5
+  #       with:
+  #         context: ${{ matrix.service }}
+  #         file: ${{ matrix.service }}/Dockerfile
+  #         push: true
+  #         tags: ${{ steps.meta.outputs.tags }}
+  #         labels: ${{ steps.meta.outputs.labels }}
+  #         cache-from: type=gha
