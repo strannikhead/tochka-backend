@@ -1,51 +1,231 @@
-openapi: 3.0.3
+openapi: 3.1.0
 info:
-  title: NeoMarket B2B (Seller Cabinet)
-  version: 0.1.0
+  title: NEO Market
+  version: 1.0.0
   description: |
-    Кабинет продавца. Создание товаров, SKU, управление ценами, накладные.
-    Связи с Moderation и B2C — частично восстановлены, детали проектируются.
+    Авторизация продавца. Кабинет продавца. Создание товаров, SKU, управление ценами, накладные, изображения.
 
 paths:
-  /api/v1/categories/:
-    get:
-      tags: [Categories]
-      summary: Получить все категории
-      responses:
-        "200":
-          description: Список всех категорий
-          content:
-            application/json:
-              schema:
-                items:
-                  $ref: '#/components/schemas/CategoryResponse'
-                type: array
+  /api/auth/register:
     post:
-      tags: [Categories]
-      summary: Создать категорию
+      tags:
+        - Auth
+      summary: Регистрация продавца
+      operationId: register_api_auth_register_post
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CategoryCreate'
+              $ref: "#/components/schemas/SellerCreate"
         required: true
       responses:
         "201":
-          description: Категория создана
+          description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CategoryResponse'
+                $ref: "#/components/schemas/SellerResponse"
         "422":
-          description: Ошибка Валидации
+          description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /api/v1/categories/{category_id}:
-    put:
-      tags: [Categories]
-      summary: Изменить категорию
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/auth/login:
+    post:
+      tags:
+        - Auth
+      summary: Login
+      operationId: login_api_auth_login_post
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/Body_login_api_auth_login_post"
+        required: true
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/auth/refresh:
+    post:
+      tags:
+        - Auth
+      summary: Обновить токены
+      operationId: refresh_api_auth_refresh_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+        required: true
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/auth/logout:
+    post:
+      tags:
+        - Auth
+      summary: Выход
+      operationId: logout_api_auth_logout_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+        required: true
+      responses:
+        "204":
+          description: Successful Response
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/seller/profile:
+    get:
+      tags:
+        - Seller
+      summary: Мой профиль
+      operationId: get_my_data_api_seller_profile_get
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SellerResponse"
+      security:
+        - OAuth2PasswordBearer: []
+  /api/seller/profile/update:
+    patch:
+      tags:
+        - Seller
+      summary: Обновить профиль
+      operationId: update_me_api_seller_profile_update_patch
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SellerUpdate"
+        required: true
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SellerResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+      security:
+        - OAuth2PasswordBearer: []
+  /api/seller/profile/delete:
+    delete:
+      tags:
+        - Seller
+      summary: Удалить аккаунт
+      operationId: delete_me_api_seller_profile_delete_delete
+      responses:
+        "204":
+          description: Successful Response
+      security:
+        - OAuth2PasswordBearer: []
+  /api/categories:
+    get:
+      tags:
+        - Categories
+      summary: Список категорий
+      operationId: get_categories_api_categories_get
+      parameters:
+        - name: parent_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+                format: uuid
+              - type: "null"
+            title: Parent Id
+        - name: only_root
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+            title: Only Root
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CategoryResponse"
+                title: Response Get Categories Api Categories Get
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    post:
+      tags:
+        - Categories
+      summary: Создать категорию
+      operationId: create_category_api_categories_post
+      security:
+        - OAuth2PasswordBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategoryCreate"
+      responses:
+        "201":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CategoryWithChildrenResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/categories/{category_id}:
+    get:
+      tags:
+        - Categories
+      summary: Категория с подкатегориями
+      operationId: get_category_api_categories__category_id__get
       parameters:
         - name: category_id
           in: path
@@ -53,82 +233,149 @@ paths:
           schema:
             type: string
             format: uuid
+            title: Category Id
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CategoryWithChildrenResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    patch:
+      tags:
+        - Categories
+      summary: Обновить категорию
+      operationId: update_category_api_categories__category_id__patch
+      security:
+        - OAuth2PasswordBearer: []
+      parameters:
+        - name: category_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Category Id
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CategoryUpdate'
+              $ref: "#/components/schemas/CategoryUpdate"
       responses:
         "200":
-          description: Категория изменена
+          description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CategoryResponse'
+                $ref: "#/components/schemas/CategoryWithChildrenResponse"
         "422":
-          description: Ошибка Валидации
+          description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /api/v1/products/:
+                $ref: "#/components/schemas/HTTPValidationError"
+    delete:
+      tags:
+        - Categories
+      summary: Удалить категорию
+      operationId: delete_category_api_categories__category_id__delete
+      security:
+        - OAuth2PasswordBearer: []
+      parameters:
+        - name: category_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Category Id
+      responses:
+        "204":
+          description: Successful Response
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/products:
+    post:
+      tags:
+        - Products
+      summary: Создать товар
+      operationId: create_product_api_products_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductCreate"
+        required: true
+      responses:
+        "201":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+      security:
+        - OAuth2PasswordBearer: []
+  /api/products/my:
     get:
-      tags: [Products]
-      summary: Получить список всех товаров с пагинацией
+      tags:
+        - Products
+      summary: Get My Products
+      operationId: get_my_products_api_products_my_get
+      security:
+        - OAuth2PasswordBearer: []
       parameters:
         - name: limit
           in: query
           required: false
           schema:
             type: integer
-            default: 10
+            default: 20
+            title: Limit
         - name: offset
           in: query
           required: false
           schema:
             type: integer
             default: 0
+            title: Offset
       responses:
         "200":
-          description: Страница из списка всех товаров
+          description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PaginatedProductResponse'
+                $ref: "#/components/schemas/ProductListResponse"
         "422":
-          description: Ошибка Валидации
+          description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-    post:
-      tags: [Products]
-      summary: Создать товар
-      operationId: create_product_api_v1_products__post
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ProductCreate'
-      responses:
-        "201":
-          description: Товар создан
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ProductResponse'
-        "422":
-          description: Ошибка Валидации
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /api/v1/products/{product_id}:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/products/{product_id}:
     get:
-      tags: [Products]
-      summary: Получить товар по ID
+      tags:
+        - Products
+      summary: Получить товар по ID (для продавца)
+      operationId: get_product_api_products__product_id__get
+      security:
+        - OAuth2PasswordBearer: []
       parameters:
         - name: product_id
           in: path
@@ -136,22 +383,27 @@ paths:
           schema:
             type: string
             format: uuid
+            title: Product Id
       responses:
         "200":
-          description: Товар с SKU
+          description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProductResponse'
+                $ref: "#/components/schemas/ProductResponse"
         "422":
-          description: Ошибка Валидации
+          description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-    put:
-      tags: [Products]
-      summary: Изменить товар
+                $ref: "#/components/schemas/HTTPValidationError"
+    patch:
+      tags:
+        - Products
+      summary: Обновить товар
+      operationId: update_product_api_products__product_id__patch
+      security:
+        - OAuth2PasswordBearer: []
       parameters:
         - name: product_id
           in: path
@@ -159,52 +411,184 @@ paths:
           schema:
             type: string
             format: uuid
+            title: Product Id
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ProductUpdate'
+              $ref: "#/components/schemas/ProductUpdate"
       responses:
         "200":
-          description: Товар изменён
+          description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProductResponse'
+                $ref: "#/components/schemas/ProductResponse"
         "422":
-          description: Ошибка Валидации
+          description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /api/v1/skus/:
+                $ref: "#/components/schemas/HTTPValidationError"
+    delete:
+      tags:
+        - Products
+      summary: Удалить товар
+      operationId: delete_product_api_products__product_id__delete
+      security:
+        - OAuth2PasswordBearer: []
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Product Id
+      responses:
+        "204":
+          description: Successful Response
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/products/images/{image_id}:
+    patch:
+      tags:
+        - Products
+      summary: Обновить изображение товара
+      operationId: update_product_image_api_products_images__image_id__patch
+      security:
+        - OAuth2PasswordBearer: []
+      parameters:
+        - name: image_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Image Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductImageUpdateRequest"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductImageResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    delete:
+      tags:
+        - Products
+      summary: Удалить изображение товара
+      operationId: delete_product_image_api_products_images__image_id__delete
+      security:
+        - OAuth2PasswordBearer: []
+      parameters:
+        - name: image_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Image Id
+      responses:
+        "204":
+          description: Successful Response
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/products/{product_id}/images:
     post:
-      tags: [SKU]
-      summary: Создать SKU
+      tags:
+        - Products
+      summary: Добавить изображение к товару
+      operationId: add_product_image_api_products__product_id__images_post
+      security:
+        - OAuth2PasswordBearer: []
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Product Id
       requestBody:
+        required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/SKUCreate'
-        required: true
+              $ref: "#/components/schemas/ProductImageCreateRequest"
       responses:
         "201":
-          description: SKU создан
+          description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SKUResponse'
+                $ref: "#/components/schemas/ProductImageResponse"
         "422":
-          description: Ошибка Валидации
+          description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /api/v1/skus/{sku_id}:
-    put:
-      tags: [SKU]
-      summary: Изменить SKU
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/skus/by-product/{product_id}:
+    get:
+      tags:
+        - SKUs
+      summary: Все SKU товара
+      operationId: get_skus_by_product_api_skus_by_product__product_id__get
+      security:
+        - OAuth2PasswordBearer: []
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Product Id
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SKUResponse"
+                title: Response Get Skus By Product Api Skus By Product  Product Id  Get
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/skus/{sku_id}:
+    get:
+      tags:
+        - SKUs
+      summary: Получить SKU
+      operationId: get_sku_api_skus__sku_id__get
+      security:
+        - OAuth2PasswordBearer: []
       parameters:
         - name: sku_id
           in: path
@@ -212,71 +596,644 @@ paths:
           schema:
             type: string
             format: uuid
+            title: Sku Id
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SKUResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    patch:
+      tags:
+        - SKUs
+      summary: Обновить SKU
+      operationId: update_sku_api_skus__sku_id__patch
+      security:
+        - OAuth2PasswordBearer: []
+      parameters:
+        - name: sku_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Sku Id
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/SKUUpdate'
+              $ref: "#/components/schemas/SKUUpdate"
       responses:
         "200":
-          description: SKU изменён
+          description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SKUResponse'
+                $ref: "#/components/schemas/SKUResponse"
         "422":
-          description: Ошибка Валидации
+          description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /api/v1/images/upload:
+                $ref: "#/components/schemas/HTTPValidationError"
+    delete:
+      tags:
+        - SKUs
+      summary: Удалить SKU
+      operationId: delete_sku_api_skus__sku_id__delete
+      security:
+        - OAuth2PasswordBearer: []
+      parameters:
+        - name: sku_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Sku Id
+      responses:
+        "204":
+          description: Successful Response
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/skus/create:
     post:
-      tags: [Images]
+      tags:
+        - SKUs
+      summary: Создать SKU
+      operationId: create_sku_api_skus_create_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SKUCreate"
+        required: true
+      responses:
+        "201":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SKUResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+      security:
+        - OAuth2PasswordBearer: []
+  /api/skus/images/{image_id}:
+    patch:
+      tags:
+        - SKUs
+      summary: Обновить изображение SKU
+      operationId: update_sku_image_api_skus_images__image_id__patch
+      security:
+        - OAuth2PasswordBearer: []
+      parameters:
+        - name: image_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Image Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SKUImageUpdateRequest"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SKUImageResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    delete:
+      tags:
+        - SKUs
+      summary: Удалить изображение SKU
+      operationId: delete_sku_image_api_skus_images__image_id__delete
+      security:
+        - OAuth2PasswordBearer: []
+      parameters:
+        - name: image_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Image Id
+      responses:
+        "204":
+          description: Successful Response
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/skus/{sku_id}/images:
+    post:
+      tags:
+        - SKUs
+      summary: Добавить изображение к SKU
+      operationId: add_sku_image_api_skus__sku_id__images_post
+      security:
+        - OAuth2PasswordBearer: []
+      parameters:
+        - name: sku_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Sku Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SKUImageCreateRequest"
+      responses:
+        "201":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SKUImageResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/invoices:
+    get:
+      tags:
+        - Invoices
+      summary: Список накладных
+      operationId: get_invoices_api_invoices_get
+      security:
+        - OAuth2PasswordBearer: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+            title: Limit
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+            title: Offset
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoiceListResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    post:
+      tags:
+        - Invoices
+      summary: Создать накладную
+      operationId: create_invoice_api_invoices_post
+      security:
+        - OAuth2PasswordBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InvoiceCreate"
+      responses:
+        "201":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoiceResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/invoices/{invoice_id}:
+    get:
+      tags:
+        - Invoices
+      summary: Получить накладную
+      operationId: get_invoice_api_invoices__invoice_id__get
+      security:
+        - OAuth2PasswordBearer: []
+      parameters:
+        - name: invoice_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Invoice Id
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoiceResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    delete:
+      tags:
+        - Invoices
+      summary: Удалить накладную (только со статусом CREATED)
+      operationId: delete_invoice_api_invoices__invoice_id__delete
+      security:
+        - OAuth2PasswordBearer: []
+      parameters:
+        - name: invoice_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Invoice Id
+      responses:
+        "204":
+          description: Successful Response
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/invoices/{invoice_id}/accept:
+    post:
+      tags:
+        - Invoices
+      summary: Принять накладную — пополнить остатки SKU
+      operationId: accept_invoice_api_invoices__invoice_id__accept_post
+      security:
+        - OAuth2PasswordBearer: []
+      parameters:
+        - name: invoice_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Invoice Id
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoiceResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/upload/image:
+    post:
+      tags:
+        - Upload
       summary: Загрузить изображение
-      description: Загрузить изображение в S3 и получить URL.
+      operationId: upload_image_endpoint_api_upload_image_post
       requestBody:
         content:
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/ImageUpload'
+              $ref: "#/components/schemas/Body_upload_image_endpoint_api_upload_image_post"
         required: true
       responses:
-        "200":
-          description: Изображение загружено
+        "201":
+          description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ImageUploadResponse'
+                $ref: "#/components/schemas/UploadResponse"
         "422":
-          description: Ошибка Валидации
+          description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: "#/components/schemas/HTTPValidationError"
+      security:
+        - OAuth2PasswordBearer: []
+  /api/public/categories/tree:
+    get:
+      tags:
+        - Public Catalog
+      summary: Get Categories Tree
+      operationId: get_categories_tree_api_public_categories_tree_get
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CategoryWithChildrenResponse"
+  /api/public/categories/{category_id}/breadcrumbs:
+    get:
+      tags:
+        - Public Catalog
+      summary: Get Breadcrumbs
+      operationId: get_breadcrumbs_api_public_categories__category_id__breadcrumbs_get
+      parameters:
+        - name: category_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Category Id
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CategoryResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/public/products:
+    get:
+      tags:
+        - Public Catalog
+      summary: Get Products Public
+      operationId: get_products_public_api_public_products_get
+      parameters:
+        - name: category_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+                format: uuid
+              - type: "null"
+            title: Category Id
+        - name: search
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Search
+        - name: min_price
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: integer
+                minimum: 0
+              - type: "null"
+            description: Минимальная цена
+            title: Min Price
+          description: Минимальная цена
+        - name: max_price
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: integer
+                minimum: 0
+              - type: "null"
+            description: Максимальная цена
+            title: Max Price
+          description: Максимальная цена
+        - name: seller_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+                format: uuid
+              - type: "null"
+            title: Seller Id
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            description: Номер страницы
+            default: 1
+            title: Page
+          description: Номер страницы
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 100
+            minimum: 1
+            description: Товаров на странице
+            default: 20
+            title: Size
+          description: Товаров на странице
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductListResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/public/products/{product_id}:
+    get:
+      tags:
+        - Public Catalog
+      summary: Get Product Public
+      operationId: get_product_public_api_public_products__product_id__get
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Product Id
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/public/products/{product_id}/similar:
+    get:
+      tags:
+        - Public Catalog
+      summary: Get Similar Products Public
+      operationId: get_similar_products_public_api_public_products__product_id__similar_get
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Product Id
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 50
+            minimum: 1
+            description: Количество похожих товаров
+            default: 10
+            title: Limit
+          description: Количество похожих товаров
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProductResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/public/skus/{sku_id}:
+    get:
+      tags:
+        - Public Catalog
+      summary: Get Sku Public
+      operationId: get_sku_public_api_public_skus__sku_id__get
+      parameters:
+        - name: sku_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Sku Id
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SKUResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
 components:
   schemas:
-    ImageUploadResponse:
-      type: object
+    Body_login_api_auth_login_post:
       properties:
-        url:
+        grant_type:
+          anyOf:
+            - type: string
+              pattern: ^password$
+            - type: "null"
+          title: Grant Type
+        username:
           type: string
-          title: Url
-          example: "/s3/427092e9-680c-4dd5-b70a-8b3d652470c1.jpg"
+          title: Username
+        password:
+          type: string
+          format: password
+          title: Password
+        scope:
+          type: string
+          title: Scope
+          default: ""
+        client_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Client Id
+        client_secret:
+          anyOf:
+            - type: string
+            - type: "null"
+          format: password
+          title: Client Secret
+      type: object
       required:
-        - url
-      title: ImageUploadResponse
-    ImageUpload:
+        - username
+        - password
+      title: Body_login_api_auth_login_post
+    Body_upload_image_endpoint_api_upload_image_post:
       properties:
         file:
           type: string
-          format: binary
+          contentMediaType: application/octet-stream
           title: File
       type: object
       required:
         - file
-      title: ImageUpload
+      title: Body_upload_image_endpoint_api_upload_image_post
     CategoryCreate:
       properties:
         name:
@@ -286,15 +1243,13 @@ components:
           anyOf:
             - type: string
               format: uuid
+            - type: "null"
           title: Parent Id
       type: object
       required:
         - name
       title: CategoryCreate
-      example:
-        name: Смартфоны
-        parent_id: 0381c08d-7e85-4fd9-9549-d5422c8efe50
-    CategoryRef:
+    CategoryResponse:
       properties:
         id:
           type: string
@@ -303,42 +1258,155 @@ components:
         name:
           type: string
           title: Name
-        level:
-          type: integer
-          title: Level
-        path:
+        parent_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Parent Id
+        created_at:
           type: string
-          title: Path
+          format: date-time
+          title: Created At
       type: object
       required:
         - id
         - name
-        - level
-        - path
-      title: CategoryRef
-      example:
-        id: 2080869e-300a-46bd-966f-7064a60ea982
-        name: Iphone
-        level: 2
-        path: 0381c08d-7e85-4fd9-9549-d5422c8efe50.5d5c8bbb-f463-4f92-82a6-0d97de0eb675.2080869e-300a-46bd-966f-7064a60ea982
-    CategoryResponse:
+        - parent_id
+        - created_at
+      title: CategoryResponse
+    CategoryUpdate:
       properties:
         name:
-          type: string
+          anyOf:
+            - type: string
+            - type: "null"
           title: Name
+        parent_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Parent Id
+      type: object
+      title: CategoryUpdate
+    CategoryWithChildrenResponse:
+      properties:
         id:
           type: string
           format: uuid
           title: Id
-        level:
-          type: integer
-          title: Level
-        path:
+        name:
           type: string
-          title: Path
-        is_active:
-          type: boolean
-          title: Is Active
+          title: Name
+        parent_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Parent Id
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        children:
+          items:
+            $ref: "#/components/schemas/CategoryResponse"
+          type: array
+          title: Children
+          default: []
+      type: object
+      required:
+        - id
+        - name
+        - parent_id
+        - created_at
+      title: CategoryWithChildrenResponse
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: "#/components/schemas/ValidationError"
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    InvoiceCreate:
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/InvoiceItemCreate"
+          type: array
+          title: Items
+      type: object
+      required:
+        - items
+      title: InvoiceCreate
+    InvoiceItemCreate:
+      properties:
+        sku_id:
+          type: string
+          format: uuid
+          title: Sku Id
+        quantity:
+          type: integer
+          title: Quantity
+      type: object
+      required:
+        - sku_id
+        - quantity
+      title: InvoiceItemCreate
+    InvoiceItemResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        sku_id:
+          type: string
+          format: uuid
+          title: Sku Id
+        quantity:
+          type: integer
+          title: Quantity
+      type: object
+      required:
+        - id
+        - sku_id
+        - quantity
+      title: InvoiceItemResponse
+    InvoiceListResponse:
+      properties:
+        total:
+          type: integer
+          title: Total
+        items:
+          items:
+            $ref: "#/components/schemas/InvoiceResponse"
+          type: array
+          title: Items
+      type: object
+      required:
+        - total
+        - items
+      title: InvoiceListResponse
+    InvoiceResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        seller_id:
+          type: string
+          format: uuid
+          title: Seller Id
+        status:
+          $ref: "#/components/schemas/InvoiceStatus"
+        items:
+          items:
+            $ref: "#/components/schemas/InvoiceItemResponse"
+          type: array
+          title: Items
         created_at:
           type: string
           format: date-time
@@ -349,48 +1417,113 @@ components:
           title: Updated At
       type: object
       required:
-        - name
         - id
-        - level
-        - path
-        - is_active
+        - seller_id
+        - status
+        - items
         - created_at
         - updated_at
-      title: CategoryResponse
-      example:
-        name: Смартфоны
-        id: 5d5c8bbb-f463-4f92-82a6-0d97de0eb675
-        level: 1
-        path: 0381c08d-7e85-4fd9-9549-d5422c8efe50.5d5c8bbb-f463-4f92-82a6-0d97de0eb675
-        is_active: true
-        created_at: 2026-04-03T06:53:18.344181
-        updated_at: 2026-04-03T06:53:18.344181
-    CategoryUpdate:
+      title: InvoiceResponse
+    InvoiceStatus:
+      type: string
+      enum:
+        - CREATED
+        - ACCEPTED
+      title: InvoiceStatus
+    ProductCharacteristicCreate:
       properties:
         name:
+          type: string
+          title: Name
+        value:
+          type: string
+          title: Value
+      type: object
+      required:
+        - name
+        - value
+      title: ProductCharacteristicCreate
+    ProductCharacteristicResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        name:
+          type: string
+          title: Name
+        value:
+          type: string
+          title: Value
+      type: object
+      required:
+        - id
+        - name
+        - value
+      title: ProductCharacteristicResponse
+    ProductCreate:
+      properties:
+        category_id:
+          type: string
+          format: uuid
+          title: Category Id
+        title:
+          type: string
+          title: Title
+        description:
           anyOf:
             - type: string
-          title: Name
-        is_active:
-          anyOf:
-            - type: boolean
-          title: Is Active
-      type: object
-      title: CategoryUpdate
-      example:
-        name: Смартфоны
-        is_active: true
-    HTTPValidationError:
-      properties:
-        detail:
+            - type: "null"
+          title: Description
+        images:
           items:
-            $ref: '#/components/schemas/ValidationError'
+            $ref: "#/components/schemas/ProductImageCreate"
           type: array
-          title: Detail
+          title: Images
+          default: []
+        characteristics:
+          items:
+            $ref: "#/components/schemas/ProductCharacteristicCreate"
+          type: array
+          title: Characteristics
+          default: []
       type: object
-      title: HTTPValidationError
-    Image:
+      required:
+        - category_id
+        - title
+      title: ProductCreate
+    ProductImageCreate:
       properties:
+        url:
+          type: string
+          title: Url
+        ordering:
+          type: integer
+          title: Ordering
+          default: 0
+      type: object
+      required:
+        - url
+      title: ProductImageCreate
+    ProductImageCreateRequest:
+      properties:
+        url:
+          type: string
+          title: Url
+        ordering:
+          type: integer
+          title: Ordering
+          default: 0
+      type: object
+      required:
+        - url
+      title: ProductImageCreateRequest
+    ProductImageResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
         url:
           type: string
           title: Url
@@ -399,144 +1532,78 @@ components:
           title: Ordering
       type: object
       required:
+        - id
         - url
         - ordering
-      title: Image
-      example:
-        url: /s3/427092e9-680c-4dd5-b70a-8b3d652470c1.jpg
-        ordering: 0
-    PaginatedProductResponse:
+      title: ProductImageResponse
+    ProductImageUpdateRequest:
       properties:
-        items:
-          items:
-            $ref: '#/components/schemas/ProductResponse'
-          type: array
-          title: Items
+        url:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Url
+        ordering:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Ordering
+      type: object
+      title: ProductImageUpdateRequest
+    ProductListResponse:
+      properties:
         total:
           type: integer
           title: Total
-        limit:
-          type: integer
-          title: Limit
-        offset:
-          type: integer
-          title: Offset
-      type: object
-      required:
-        - items
-        - total
-        - limit
-        - offset
-      title: PaginatedProductResponse
-      example:
         items:
-          - title: Iphone 15 Pro
-            description: Флагман Apple...
-            status: CREATED
-            images:
-              - url: /s3/427092e9-680c-4dd5-b70a-8b3d652470c1.jpg
-                ordering: 0
-            characteristics:
-              - name: Бренд
-                value: Apple
-            id: b26fc63e-573b-4ed2-983a-2dbcfb597761
-            created_at: 2026-04-03T07:02:46.865655
-            updated_at: 2026-04-03T07:02:46.865655
-            category:
-              id: 2080869e-300a-46bd-966f-7064a60ea982
-              name: Iphone
-              level: 2
-              path: 0381c08d-7e85-4fd9-9549-d5422c8efe50.5d5c8bbb-f463-4f92-82a6-0d97de0eb675.2080869e-300a-46bd-966f-7064a60ea982
-            skus:
-              - name: 256 Black
-                price: 89990
-                active_quantity: 3
-                images:
-                  - url: /s3/451a3d11-996f-49ba-8f6f-748dc1f7ce4c.jpg
-                    ordering: 0
-                characteristics:
-                  - name: Цвет
-                    value: Чёрный
-                  - name: Объём памяти
-                    value: 256 ГБ
-                product_id: b26fc63e-573b-4ed2-983a-2dbcfb597761
-                id: b2e217d3-8cfd-49c4-84bd-a43696d4496a
-                created_at: 2026-04-03T07:16:28.258993
-                updated_at: 2026-04-03T07:16:28.258993
-        total: 1
-        limit: 10
-        offset: 0
-    ProductCreate:
-      properties:
-        title:
-          type: string
-          title: Title
-        description:
-          anyOf:
-            - type: string
-          title: Description
-        images:
           items:
-            $ref: '#/components/schemas/Image'
+            $ref: "#/components/schemas/ProductShortResponse"
           type: array
-          title: Images
-          default: []
-        characteristics:
-          items:
-            additionalProperties: true
-            type: object
-          type: array
-          title: Characteristics
-          default: []
-        category_id:
-          type: string
-          format: uuid
-          title: Category Id
+          title: Items
       type: object
       required:
-        - title
-        - category_id
-      title: ProductCreate
-      example:
-        title: Iphone 15 Pro
-        description: Флагман Apple...
-        images:
-          - url: /s3/427092e9-680c-4dd5-b70a-8b3d652470c1.jpg
-            ordering: 0
-        characteristics:
-          - name: Бренд
-            value: Apple
-        category_id: 2080869e-300a-46bd-966f-7064a60ea982
+        - total
+        - items
+      title: ProductListResponse
     ProductResponse:
       properties:
-        title:
-          type: string
-          title: Title
-        description:
-          anyOf:
-            - type: string
-          title: Description
-        status:
-          allOf:
-            - $ref: "#/components/schemas/ProductStatus"
-          default: CREATED
-        images:
-          items:
-            $ref: '#/components/schemas/Image'
-          type: array
-          title: Images
-          default: []
-        characteristics:
-          items:
-            additionalProperties: true
-            type: object
-          type: array
-          title: Characteristics
-          default: []
         id:
           type: string
           format: uuid
           title: Id
+        seller_id:
+          type: string
+          format: uuid
+          title: Seller Id
+        category_id:
+          type: string
+          format: uuid
+          title: Category Id
+        title:
+          type: string
+          title: Title
+        description:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Description
+        status:
+          $ref: "#/components/schemas/ProductStatus"
+        images:
+          items:
+            $ref: "#/components/schemas/ProductImageResponse"
+          type: array
+          title: Images
+        characteristics:
+          items:
+            $ref: "#/components/schemas/ProductCharacteristicResponse"
+          type: array
+          title: Characteristics
+        skus:
+          items:
+            $ref: "#/components/schemas/SKUShortResponse"
+          type: array
+          title: Skus
         created_at:
           type: string
           format: date-time
@@ -545,56 +1612,47 @@ components:
           type: string
           format: date-time
           title: Updated At
-        category:
-          $ref: '#/components/schemas/CategoryRef'
-        skus:
-          items:
-            $ref: '#/components/schemas/SKUResponse'
-          type: array
-          title: Skus
       type: object
       required:
-        - title
         - id
+        - seller_id
+        - category_id
+        - title
+        - description
+        - status
+        - images
+        - characteristics
+        - skus
         - created_at
         - updated_at
-        - category
-        - skus
       title: ProductResponse
-      example:
-        title: Iphone 15 Pro
-        description: Флагман Apple...
-        status: CREATED
-        images:
-          - url: /s3/427092e9-680c-4dd5-b70a-8b3d652470c1.jpg
-            ordering: 0
-        characteristics:
-          - name: Бренд
-            value: Apple
-        id: b26fc63e-573b-4ed2-983a-2dbcfb597761
-        created_at: 2026-04-03T07:02:46.865655
-        updated_at: 2026-04-03T07:02:46.865655
-        category:
-          id: 2080869e-300a-46bd-966f-7064a60ea982
-          name: Iphone
-          level: 2
-          path: 0381c08d-7e85-4fd9-9549-d5422c8efe50.5d5c8bbb-f463-4f92-82a6-0d97de0eb675.2080869e-300a-46bd-966f-7064a60ea982
-        skus:
-          - name: 256 Black
-            price: 89990
-            active_quantity: 3
-            images:
-              - url: /s3/451a3d11-996f-49ba-8f6f-748dc1f7ce4c.jpg
-                ordering: 0
-            characteristics:
-              - name: Цвет
-                value: Чёрный
-              - name: Объём памяти
-                value: 256 ГБ
-            product_id: b26fc63e-573b-4ed2-983a-2dbcfb597761
-            id: b2e217d3-8cfd-49c4-84bd-a43696d4496a
-            created_at: 2026-04-03T07:16:28.258993
-            updated_at: 2026-04-03T07:16:28.258993
+    ProductShortResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        title:
+          type: string
+          title: Title
+        status:
+          $ref: "#/components/schemas/ProductStatus"
+        category_id:
+          type: string
+          format: uuid
+          title: Category Id
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+      type: object
+      required:
+        - id
+        - title
+        - status
+        - category_id
+        - created_at
+      title: ProductShortResponse
     ProductStatus:
       type: string
       enum:
@@ -602,131 +1660,202 @@ components:
         - ON_MODERATION
         - MODERATED
         - BLOCKED
-        - DELETED
       title: ProductStatus
-      example: CREATED
     ProductUpdate:
       properties:
+        category_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Category Id
         title:
-          type: string
+          anyOf:
+            - type: string
+            - type: "null"
           title: Title
         description:
           anyOf:
             - type: string
+            - type: "null"
           title: Description
-        images:
-          items:
-            $ref: '#/components/schemas/Image'
-          type: array
-          title: Images
-          default: []
-        characteristics:
-          items:
-            additionalProperties: true
-            type: object
-          type: array
-          title: Characteristics
-          default: []
-        category_id:
+        status:
+          anyOf:
+            - $ref: "#/components/schemas/ProductStatus"
+            - type: "null"
+      type: object
+      title: ProductUpdate
+    RefreshRequest:
+      properties:
+        refresh_token:
           type: string
-          format: uuid
-          title: Category Id
+          title: Refresh Token
       type: object
       required:
-        - title
-        - category_id
-      title: ProductUpdate
-      example:
-        title: Iphone 15 Pro
-        description: Флагман Apple...
-        images:
-          - url: /s3/427092e9-680c-4dd5-b70a-8b3d652470c1.jpg
-            ordering: 0
-        characteristics:
-          - name: Бренд
-            value: Apple
-        category_id: 2080869e-300a-46bd-966f-7064a60ea982
-    SKUCreate:
+        - refresh_token
+      title: RefreshRequest
+    SKUCharacteristicCreate:
       properties:
         name:
           type: string
           title: Name
-        price:
-          type: integer
-          title: Price
-        active_quantity:
-          type: integer
-          title: Active Quantity
-          default: 0
-        images:
-          items:
-            $ref: '#/components/schemas/Image'
-          type: array
-          title: Images
-          default: []
-        characteristics:
-          items:
-            additionalProperties: true
-            type: object
-          type: array
-          title: Characteristics
-          default: []
-        product_id:
+        value:
           type: string
-          format: uuid
-          title: Product Id
+          title: Value
       type: object
       required:
         - name
-        - price
-        - product_id
-      title: SKUCreate
-      example:
-        name: 256 Black
-        price: 89990
-        active_quantity: 3
-        images:
-          - url: /s3/451a3d11-996f-49ba-8f6f-748dc1f7ce4c.jpg
-            ordering: 0
-        characteristics:
-          - name: Цвет
-            value: Чёрный
-          - name: Объём памяти
-            value: 256 ГБ
-        product_id: b26fc63e-573b-4ed2-983a-2dbcfb597761
-    SKUResponse:
+        - value
+      title: SKUCharacteristicCreate
+    SKUCharacteristicResponse:
       properties:
-        name:
-          type: string
-          title: Name
-        price:
-          type: integer
-          title: Price
-        active_quantity:
-          type: integer
-          title: Active Quantity
-          default: 0
-        images:
-          items:
-            $ref: '#/components/schemas/Image'
-          type: array
-          title: Images
-          default: []
-        characteristics:
-          items:
-            additionalProperties: true
-            type: object
-          type: array
-          title: Characteristics
-          default: []
-        product_id:
-          type: string
-          format: uuid
-          title: Product Id
         id:
           type: string
           format: uuid
           title: Id
+        name:
+          type: string
+          title: Name
+        value:
+          type: string
+          title: Value
+      type: object
+      required:
+        - id
+        - name
+        - value
+      title: SKUCharacteristicResponse
+    SKUCreate:
+      properties:
+        product_id:
+          type: string
+          format: uuid
+          title: Product Id
+        name:
+          type: string
+          title: Name
+        price:
+          type: integer
+          title: Price
+        stock_quantity:
+          type: integer
+          title: Stock Quantity
+          default: 0
+        article:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Article
+        images:
+          items:
+            $ref: "#/components/schemas/SKUImageCreate"
+          type: array
+          title: Images
+          default: []
+        characteristics:
+          items:
+            $ref: "#/components/schemas/SKUCharacteristicCreate"
+          type: array
+          title: Characteristics
+          default: []
+      type: object
+      required:
+        - product_id
+        - name
+        - price
+      title: SKUCreate
+    SKUImageCreate:
+      properties:
+        url:
+          type: string
+          title: Url
+        ordering:
+          type: integer
+          title: Ordering
+          default: 0
+      type: object
+      required:
+        - url
+      title: SKUImageCreate
+    SKUImageCreateRequest:
+      properties:
+        url:
+          type: string
+          title: Url
+        ordering:
+          type: integer
+          title: Ordering
+          default: 0
+      type: object
+      required:
+        - url
+      title: SKUImageCreateRequest
+    SKUImageResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        url:
+          type: string
+          title: Url
+        ordering:
+          type: integer
+          title: Ordering
+      type: object
+      required:
+        - id
+        - url
+        - ordering
+      title: SKUImageResponse
+    SKUImageUpdateRequest:
+      properties:
+        url:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Url
+        ordering:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Ordering
+      type: object
+      title: SKUImageUpdateRequest
+    SKUResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        product_id:
+          type: string
+          format: uuid
+          title: Product Id
+        name:
+          type: string
+          title: Name
+        price:
+          type: integer
+          title: Price
+        stock_quantity:
+          type: integer
+          title: Stock Quantity
+        article:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Article
+        images:
+          items:
+            $ref: "#/components/schemas/SKUImageResponse"
+          type: array
+          title: Images
+        characteristics:
+          items:
+            $ref: "#/components/schemas/SKUCharacteristicResponse"
+          type: array
+          title: Characteristics
         created_at:
           type: string
           format: date-time
@@ -737,77 +1866,204 @@ components:
           title: Updated At
       type: object
       required:
+        - id
+        - product_id
         - name
         - price
-        - product_id
-        - id
+        - stock_quantity
+        - article
+        - images
+        - characteristics
         - created_at
         - updated_at
       title: SKUResponse
-      example:
-        name: 256 Black
-        price: 89990
-        active_quantity: 3
-        images:
-          - url: /s3/451a3d11-996f-49ba-8f6f-748dc1f7ce4c.jpg
-            ordering: 0
-        characteristics:
-          - name: Цвет
-            value: Чёрный
-          - name: Объём памяти
-            value: 256 ГБ
-        product_id: b26fc63e-573b-4ed2-983a-2dbcfb597761
-        id: b2e217d3-8cfd-49c4-84bd-a43696d4496a
-        created_at: 2026-04-03T07:16:28.258993
-        updated_at: 2026-04-03T07:16:28.258993
-    SKUUpdate:
+    SKUShortResponse:
       properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
         name:
           type: string
           title: Name
         price:
           type: integer
           title: Price
-        active_quantity:
+        stock_quantity:
           type: integer
-          title: Active Quantity
-        images:
-          items:
-            $ref: '#/components/schemas/Image'
-          type: array
-          title: Images
-          default: []
-        characteristics:
-          items:
-            additionalProperties: true
-            type: object
-          type: array
-          title: Characteristics
-          default: []
-        product_id:
-          type: string
-          format: uuid
-          title: Product Id
+          title: Stock Quantity
+        article:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Article
       type: object
       required:
+        - id
         - name
         - price
-        - active_quantity
-        - product_id
+        - stock_quantity
+        - article
+      title: SKUShortResponse
+    SKUUpdate:
+      properties:
+        name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Name
+        price:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Price
+        article:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Article
+      type: object
       title: SKUUpdate
-      example:
-        name: 256 Black
-        price: 89990
-        active_quantity: 3
-        images:
-          - url: /s3/451a3d11-996f-49ba-8f6f-748dc1f7ce4c.jpg
-            ordering: 0
-        characteristics:
-          - name: Цвет
-            value: Чёрный
-          - name: Объём памяти
-            value: 256 ГБ
-        product_id: b26fc63e-573b-4ed2-983a-2dbcfb597761
+    SellerCreate:
+      properties:
+        email:
+          type: string
+          format: email
+          title: Email
+        password:
+          type: string
+          title: Password
+        first_name:
+          type: string
+          title: First Name
+        last_name:
+          type: string
+          title: Last Name
+        middle_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Middle Name
+        company_name:
+          type: string
+          title: Company Name
+        phone:
+          anyOf:
+            - type: string
+              format: phone
+            - type: "null"
+          title: Phone
+      type: object
+      required:
+        - email
+        - password
+        - first_name
+        - last_name
+        - company_name
+      title: SellerCreate
+    SellerResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        email:
+          type: string
+          title: Email
+        first_name:
+          type: string
+          title: First Name
+        last_name:
+          type: string
+          title: Last Name
+        middle_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Middle Name
+        company_name:
+          type: string
+          title: Company Name
+        phone:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Phone
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+        - id
+        - email
+        - first_name
+        - last_name
+        - middle_name
+        - company_name
+        - phone
+        - created_at
+        - updated_at
+      title: SellerResponse
+    SellerUpdate:
+      properties:
+        first_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: First Name
+        last_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Last Name
+        middle_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Middle Name
+        company_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Company Name
+        phone:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Phone
+      type: object
+      title: SellerUpdate
+    TokenResponse:
+      properties:
+        access_token:
+          type: string
+          title: Access Token
+        refresh_token:
+          type: string
+          title: Refresh Token
+        token_type:
+          type: string
+          title: Token Type
+          default: bearer
+      type: object
+      required:
+        - access_token
+        - refresh_token
+      title: TokenResponse
+    UploadResponse:
+      properties:
+        url:
+          type: string
+          title: Url
+      type: object
+      required:
+        - url
+      title: UploadResponse
     ValidationError:
       properties:
         loc:
@@ -834,3 +2090,10 @@ components:
         - msg
         - type
       title: ValidationError
+  securitySchemes:
+    OAuth2PasswordBearer:
+      type: oauth2
+      flows:
+        password:
+          scopes: {}
+          tokenUrl: /api/auth/login
