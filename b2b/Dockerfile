@@ -26,7 +26,7 @@ COPY b2b/src ./b2b/src
 
 # Copy entrypoint script
 COPY b2b/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 EXPOSE 8000
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]
