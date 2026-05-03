@@ -75,6 +75,8 @@ paths:
                 id: "660e8400-e29b-41d4-a716-446655440001"
                 name: "iPhone 14 Pro 128GB Silver"
                 price: 999.99
+                discount: 0
+                in_stock: true
                 quantity: 15
                 characteristics:
                   - name: "COLOR"
@@ -241,6 +243,8 @@ paths:
                   - id: "660e8400-e29b-41d4-a716-446655440001"
                     name: "iPhone 14 Pro 128GB Silver"
                     price: 999.99
+                    discount: 0
+                    in_stock: true
                     quantity: 15
                     characteristics:
                       - name: "COLOR"
@@ -896,6 +900,14 @@ components:
           type: number
           description: Цена
           example: 999.99
+        discount:
+          type: integer
+          description: Скидка
+          example: 0
+        in_stock:
+          type: boolean
+          description: Доступность SKU
+          example: true
         quantity:
           type: integer
           description: Количество на складе
@@ -913,12 +925,16 @@ components:
         - id
         - name
         - price
+        - discount
+        - in_stock
         - quantity
         - characteristics
       example:
         id: "660e8400-e29b-41d4-a716-446655440001"
         name: "iPhone 14 Pro 128GB Silver"
         price: 999.99
+        discount: 0
+        in_stock: true
         quantity: 15
         characteristics:
           - name: "COLOR"
