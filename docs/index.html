@@ -2,9 +2,43 @@
 <html>
 <head>
   <title>NeoMarket API</title>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist/swagger-ui.css">
+  <style>
+    body {
+      margin: 0;
+      font-family: "IBM Plex Sans", system-ui, sans-serif;
+      background: #f5f4f1;
+    }
+
+    .docs-header {
+      background: linear-gradient(120deg, #fef7e7, #f0f6ff);
+      border-bottom: 1px solid #e6e0d5;
+      padding: 16px 24px;
+    }
+
+    .docs-header__title {
+      margin: 0 0 8px 0;
+      font-size: 20px;
+      color: #1f2a37;
+    }
+
+    .docs-header__link {
+      color: #0b4f6c;
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    .docs-header__link:hover {
+      text-decoration: underline;
+    }
+  </style>
 </head>
 <body>
+  <header class="docs-header">
+    <p class="docs-header__title">NeoMarket: документация и черновики UI</p>
+    <a class="docs-header__link" href="product-card.html">Карточка товара (черновик фронта)</a>
+  </header>
   <div id="swagger-ui"></div>
   <script src="https://unpkg.com/swagger-ui-dist/swagger-ui-bundle.js"></script>
   <script src="https://unpkg.com/swagger-ui-dist/swagger-ui-standalone-preset.js"></script>
