@@ -1,7 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
-from api import cart, catalog, categories, favorites, home, products
+from src.api import cart, catalog, categories, favorites, home, products
 
 app = FastAPI(title="B2C (catalog, cart, favorites, home)")
 

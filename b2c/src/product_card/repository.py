@@ -6,8 +6,7 @@ from typing import Any, Protocol
 from uuid import UUID
 
 import httpx
-
-from product_card.domain import Characteristic, Image, Product, ProductStatus, Sku
+from src.product_card.domain import Characteristic, Image, Product, ProductStatus, Sku
 
 
 class ProductRepository(Protocol):

@@ -3,8 +3,8 @@ from __future__ import annotations
 from uuid import UUID
 
 from pydantic import BaseModel
-
-from product_card.domain import Characteristic, Image, Product, ProductStatus, Sku
+from src.catalog.domain import ProductShort, ProductShortList
+from src.product_card.domain import Characteristic, Image, Product, ProductStatus, Sku
 
 
 class ImageResponse(BaseModel):
@@ -76,4 +76,40 @@ class ProductResponse(BaseModel):
                 for characteristic in product.characteristics
             ],
             skus=[SkuResponse.from_domain(sku) for sku in product.skus],
+        )
+
+
+class ProductShortResponse(BaseModel):
+    id: UUID
+    title: str
+    image: str
+    price: int
+    in_stock: bool
+    is_in_cart: bool
+
+    @classmethod
+    def from_domain(cls, product: ProductShort) -> ProductShortResponse:
+        return cls(
+            id=product.id,
+            title=product.title,
+            image=product.image,
+            price=product.price,
+            in_stock=product.in_stock,
+            is_in_cart=product.is_in_cart,
+        )
+
+
+class ProductShortListResponse(BaseModel):
+    total_count: int
+    limit: int
+    offset: int
+    items: list[ProductShortResponse]
+
+    @classmethod
+    def from_domain(cls, product_list: ProductShortList) -> ProductShortListResponse:
+        return cls(
+            total_count=product_list.total_count,
+            limit=product_list.limit,
+            offset=product_list.offset,
+            items=[ProductShortResponse.from_domain(item) for item in product_list.items],
         )

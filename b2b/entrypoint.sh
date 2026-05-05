@@ -16,4 +16,5 @@ export DATABASE_URL="${DATABASE_URL/postgresql:/postgresql+psycopg:}"
 alembic upgrade head
 
 echo "Starting application"
+export PYTHONPATH="/app/b2b:$PYTHONPATH"
 exec uvicorn main:app --app-dir /app/b2b/src --host 0.0.0.0 --port 8000
