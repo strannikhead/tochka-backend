@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from product_card.domain import Product, ProductStatus
-from product_card.repository import ProductRepository
+from src.product_card.domain import Product, ProductStatus
+from src.product_card.repository import ProductRepository
 
 
 class ProductCardService:

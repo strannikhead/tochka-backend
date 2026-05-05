@@ -3,9 +3,8 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import Depends
-
-from product_card.repository import HttpProductRepository, ProductRepository
-from product_card.service import ProductCardService
+from src.product_card.repository import HttpProductRepository, ProductRepository
+from src.product_card.service import ProductCardService
 
 
 def get_product_repository() -> ProductRepository:
