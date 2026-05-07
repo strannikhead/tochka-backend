@@ -153,8 +153,11 @@ paths:
       summary: Добавление товара в избранное
       description: |
         Добавляет товар в избранное пользователя.
-        Если товар уже находится в избранном, можно вернуть 200,
-        чтобы операция была безопасной для повторного вызова.
+        Если товар уже находится в избранном, возвращается 200.
+        Операция безопасна для повторного вызова (идемпотентна).
+
+        **Авторизация:** идентификатор пользователя извлекается из JWT-токена.
+        Передавать user_id в query или body **запрещено** во избежание IDOR.
 
       parameters:
         - name: product_id
@@ -165,14 +168,6 @@ paths:
             type: string
             format: uuid
             example: "550e8400-e29b-41d4-a716-446655440000"
-        - name: user_id
-          in: query
-          required: true
-          description: Идентификатор пользователя (UUID)
-          schema:
-            type: string
-            format: uuid
-            example: "123e4567-e89b-12d3-a456-426614174000"
 
       responses:
         "201":
@@ -207,7 +202,7 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
                 code: "INVALID_PARAMETER"
-                message: "Некорректный UUID product_id или user_id"
+                message: "Некорректный UUID product_id"
 
         "401":
           description: Пользователь не авторизован
@@ -245,7 +240,10 @@ paths:
       summary: Удаление товара из избранного
       description: |
         Удаляет товар из избранного пользователя.
-        Если товара не было в избранном, можно всё равно вернуть 204.
+        Если товара не было в избранном — возвращается 204 (идемпотентно).
+
+        **Авторизация:** идентификатор пользователя извлекается из JWT-токена.
+        Передавать user_id в query или body **запрещено** во избежание IDOR.
 
       parameters:
         - name: product_id
@@ -256,14 +254,6 @@ paths:
             type: string
             format: uuid
             example: "550e8400-e29b-41d4-a716-446655440000"
-        - name: user_id
-          in: query
-          required: true
-          description: Идентификатор пользователя (UUID)
-          schema:
-            type: string
-            format: uuid
-            example: "123e4567-e89b-12d3-a456-426614174000"
 
       responses:
         "204":

@@ -3,10 +3,11 @@ from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
-from src.api.products.dependencies import get_product_repository
-from src.main import app
-from src.product_card.domain import Characteristic, Image, Product, ProductStatus, Sku
-from src.product_card.repository import ProductRepository
+
+from api.products.dependencies import get_product_repository
+from main import app
+from product_card.domain import Characteristic, Image, Product, ProductStatus, Sku
+from product_card.repository import ProductRepository
 
 PRODUCT_ID = UUID("770e8400-e29b-41d4-a716-446655440002")
 BLOCKED_PRODUCT_ID = UUID("770e8400-e29b-41d4-a716-446655440099")
