@@ -3,17 +3,19 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.products.dependencies import get_product_repository
-from favorites.repository import FavoriteRepository, InMemoryFavoriteRepository
+from database import get_db_session
+from favorites.repository import DbFavoriteRepository, FavoriteRepository
 from favorites.service import FavoritesService
 from product_card.repository import ProductRepository
 
-_default_repo = InMemoryFavoriteRepository()
 
-
-def get_favorite_repository() -> FavoriteRepository:
-    return _default_repo
+def get_favorite_repository(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> FavoriteRepository:
+    return DbFavoriteRepository(session)
 
 
 def get_favorites_service(
