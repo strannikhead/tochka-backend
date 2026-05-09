@@ -248,12 +248,14 @@ def _matches_filters(product: dict[str, Any], filters: dict[str, list[str]]) -> 
 
 def _sort_products(products: list[dict[str, Any]], sort: str | None) -> list[dict[str, Any]]:
     sort_key, reverse = _ALLOWED_SORTS.get(sort or "rating", _ALLOWED_SORTS["rating"])
+    # determine whether this sort_key should be treated as numeric
+    numeric_keys = {"price", "active_quantity", "rating", "popularity", "discount"}
 
     def key_func(item: dict[str, Any]) -> Any:
         value = item.get(sort_key)
-        # normalize None to a value comparable with numbers/strings
         if value is None:
-            return -999999999 if isinstance(value, (int, float)) else ""
+            # return a sentinel that is comparable with other values of the expected type
+            return -999999999 if sort_key in numeric_keys else ""
         return value
 
     return sorted(products, key=key_func, reverse=reverse)

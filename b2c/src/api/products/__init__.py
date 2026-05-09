@@ -60,6 +60,11 @@ async def list_products(
                 content={"message": "Search query is too long"},
             )
 
+    # normalize search for repository call: use trimmed string or None
+    search_for_repo = None
+    if search is not None:
+        search_for_repo = search.strip() or None
+
     try:
         filters = parse_filters(request)
     except ValueError:
@@ -71,7 +76,7 @@ async def list_products(
             sort=sort,
             limit=limit,
             offset=offset,
-            search=search,
+            search=search_for_repo,
         )
     except UpstreamServiceError as exc:
         status_code = 502 if exc.status_code is None else exc.status_code

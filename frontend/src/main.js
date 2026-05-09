@@ -127,10 +127,14 @@ function renderProductView() {
     product.characteristics.forEach((item) => {
       const block = document.createElement("div");
       block.className = "characteristic";
-      block.innerHTML = `
-        <div class="characteristic__name">${item.name}</div>
-        <div class="characteristic__value">${item.value}</div>
-      `;
+      const nameEl = document.createElement("div");
+      nameEl.className = "characteristic__name";
+      nameEl.textContent = item.name;
+      const valueEl = document.createElement("div");
+      valueEl.className = "characteristic__value";
+      valueEl.textContent = item.value;
+      block.appendChild(nameEl);
+      block.appendChild(valueEl);
       characteristics.appendChild(block);
     });
   }
@@ -186,15 +190,23 @@ function renderProductView() {
       const isAvailable = isSkuAvailable(sku);
 
       item.className = `sku-item${isActive ? " sku-item--active" : ""}`;
-      item.innerHTML = `
-        <div>
-          <div class="sku-item__name">${sku.name}</div>
-          <div class="sku-item__meta">${sku.characteristics.map((c) => c.value).join(" · ")}</div>
-        </div>
-        <div class="sku-item__status${isAvailable ? "" : " sku-item__status--off"}">
-          ${isAvailable ? "В наличии" : "Нет в наличии"}
-        </div>
-      `;
+
+      const wrapper = document.createElement("div");
+      const nameEl = document.createElement("div");
+      nameEl.className = "sku-item__name";
+      nameEl.textContent = sku.name;
+      const metaEl = document.createElement("div");
+      metaEl.className = "sku-item__meta";
+      metaEl.textContent = sku.characteristics.map((c) => c.value).join(" · ");
+      wrapper.appendChild(nameEl);
+      wrapper.appendChild(metaEl);
+
+      const statusEl = document.createElement("div");
+      statusEl.className = `sku-item__status${isAvailable ? "" : " sku-item__status--off"}`;
+      statusEl.textContent = isAvailable ? "В наличии" : "Нет в наличии";
+
+      item.appendChild(wrapper);
+      item.appendChild(statusEl);
 
       item.addEventListener("click", () => {
         const nextParams = new URLSearchParams(window.location.search);
@@ -202,6 +214,8 @@ function renderProductView() {
         nextParams.set("sku", sku.id);
         nextParams.set("id", product.id);
         history.replaceState(null, "", `?${nextParams.toString()}`);
+        // update selected SKU id before re-render so active state updates correctly
+        selectedSkuId = sku.id;
         setSku(sku);
         renderSkus();
       });
@@ -345,7 +359,10 @@ function renderCatalogView() {
     } else {
       pendingRequests = Math.max(0, pendingRequests - 1);
       if (pendingRequests === 0) {
-        setCatalogStatus("");
+        // don't clear error messages set by setCatalogStatus(..., true)
+        if (!catalogStatus.classList.contains("status--error")) {
+          setCatalogStatus("");
+        }
       }
     }
   }
@@ -397,27 +414,47 @@ function renderCatalogView() {
     loadCatalog();
   }
 
+  function _sanitizeForId(str) {
+    return String(str).replace(/\s+/g, "-").replace(/[^a-zA-Z0-9\-_]/g, "").toLowerCase();
+  }
+
   function renderFacets(facets) {
     facetList.innerHTML = "";
     facets.forEach((facet) => {
       const group = document.createElement("div");
       group.className = "filter-group";
-      group.innerHTML = `<div class="filter-group__title">${facet.name}</div>`;
+      const title = document.createElement("div");
+      title.className = "filter-group__title";
+      title.textContent = facet.name;
+      group.appendChild(title);
 
-      facet.values.forEach((item) => {
-        const id = `filter-${facet.name}-${item.value}`;
+      facet.values.forEach((item, idx) => {
+        const safeName = _sanitizeForId(facet.name);
+        const id = `filter-${safeName}-${idx}`;
         const option = document.createElement("label");
         const isChecked = (state.filters[facet.name] || []).includes(item.value);
         option.className = "filter-option";
-        option.innerHTML = `
-          <input id="${id}" type="checkbox" ${isChecked ? "checked" : ""} />
-          <span>${item.value}</span>
-          <span class="filter-option__count">${item.count}</span>
-        `;
-        const input = option.querySelector("input");
+
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.id = id;
+        if (isChecked) input.checked = true;
+
+        const valueSpan = document.createElement("span");
+        valueSpan.textContent = item.value;
+
+        const countSpan = document.createElement("span");
+        countSpan.className = "filter-option__count";
+        countSpan.textContent = String(item.count);
+
         input.addEventListener("change", (event) => {
           toggleFilter(facet.name, item.value, event.target.checked);
         });
+
+        option.appendChild(input);
+        option.appendChild(valueSpan);
+        option.appendChild(countSpan);
+
         group.appendChild(option);
       });
 
@@ -428,28 +465,54 @@ function renderCatalogView() {
   function renderProducts(items) {
     productGrid.innerHTML = "";
     if (!items.length) {
-      productGrid.innerHTML = `
-        <div class="empty-state">
-          <h3>Ничего не найдено</h3>
-          <p>Попробуйте сбросить фильтры или изменить сортировку.</p>
-        </div>
-      `;
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      const h3 = document.createElement("h3");
+      h3.textContent = "Ничего не найдено";
+      const p = document.createElement("p");
+      p.textContent = "Попробуйте сбросить фильтры или изменить сортировку.";
+      empty.appendChild(h3);
+      empty.appendChild(p);
+      productGrid.appendChild(empty);
       return;
     }
     items.forEach((item) => {
       const card = document.createElement("article");
       card.className = "product-card";
-      card.innerHTML = `
-        <img src="${item.image}" alt="${item.title}" />
-        <div class="product-card__body">
-          <h3>${item.title}</h3>
-          <div class="product-card__price">${formatPrice(item.price)}</div>
-          <div class="product-card__meta">
-            <span class="pill">${item.in_stock ? "В наличии" : "Нет в наличии"}</span>
-            <span class="pill pill--muted">${item.is_in_cart ? "В корзине" : "Не в корзине"}</span>
-          </div>
-        </div>
-      `;
+
+      const img = document.createElement("img");
+      img.setAttribute("src", item.image || "");
+      img.setAttribute("alt", item.title || "");
+
+      const body = document.createElement("div");
+      body.className = "product-card__body";
+
+      const h3 = document.createElement("h3");
+      h3.textContent = item.title;
+
+      const priceDiv = document.createElement("div");
+      priceDiv.className = "product-card__price";
+      priceDiv.textContent = formatPrice(item.price);
+
+      const meta = document.createElement("div");
+      meta.className = "product-card__meta";
+      const inStock = document.createElement("span");
+      inStock.className = "pill";
+      inStock.textContent = item.in_stock ? "В наличии" : "Нет в наличии";
+      const inCart = document.createElement("span");
+      inCart.className = "pill pill--muted";
+      inCart.textContent = item.is_in_cart ? "В корзине" : "Не в корзине";
+
+      meta.appendChild(inStock);
+      meta.appendChild(inCart);
+
+      body.appendChild(h3);
+      body.appendChild(priceDiv);
+      body.appendChild(meta);
+
+      card.appendChild(img);
+      card.appendChild(body);
+
       productGrid.appendChild(card);
     });
   }
