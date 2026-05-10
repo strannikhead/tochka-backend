@@ -81,7 +81,7 @@ def test__similar__respects_limit(client: TestClient) -> None:
     for index in range(1, 11):
         products.append(
             build_product(
-                product_id=UUID(f"770e8400-e29b-41d4-a716-44665544021{index}"),
+                product_id=UUID(f"770e8400-e29b-41d4-a716-4466554403{index:02d}"),
                 category_id=CATEGORY_ID,
                 title=f"Item {index}",
             )
@@ -110,7 +110,7 @@ def test__similar__respects_offset(client: TestClient) -> None:
     for index in range(1, 11):
         products.append(
             build_product(
-                product_id=UUID(f"770e8400-e29b-41d4-a716-44665544031{index}"),
+                product_id=UUID(int=current_id.int + index),
                 category_id=CATEGORY_ID,
                 title=f"Item {index}",
             )

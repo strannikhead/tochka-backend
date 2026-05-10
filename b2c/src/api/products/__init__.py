@@ -122,7 +122,7 @@ async def get_similar_products(
     try:
         category_id = UUID(category)
     except ValueError:
-        return JSONResponse(status_code=400, content={"message": "Nonexistent category id"})
+        return JSONResponse(status_code=400, content={"message": "Некорректный id категории"})
 
     try:
         similar = await repository.get_similar_products(

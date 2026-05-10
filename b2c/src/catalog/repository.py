@@ -174,24 +174,47 @@ class InMemoryCatalogRepository:
             for product in self._products
             if product.category_id == category_id and product.id != product_id
         ]
-        candidates = list(primary)
-        required_count = limit + offset
+        primary_count = len(primary)
         parent_id = self._category_parents.get(category_id)
-        if len(primary) < required_count and parent_id is not None:
+        parent = []
+        if parent_id is not None:
             primary_ids = {product.id for product in primary}
-            for product in self._products:
-                if product.category_id != parent_id or product.id == product_id:
-                    continue
-                if product.id in primary_ids:
-                    continue
-                candidates.append(product)
+            parent = [
+                product
+                for product in self._products
+                if product.category_id == parent_id
+                and product.id != product_id
+                and product.id not in primary_ids
+            ]
 
-        total_count = len(candidates)
-        random.shuffle(candidates)
-        paginated = candidates[offset : offset + limit]
-        items = tuple(product.to_short() for product in paginated)
+        required_count = limit + offset
+        use_parent = parent_id is not None and primary_count < required_count
+        total_count = primary_count + (len(parent) if use_parent else 0)
+
+        rng = random.Random(product_id.int)  # noqa: S311
+        primary_shuffled = list(primary)
+        rng.shuffle(primary_shuffled)
+
+        items: list[ProductShort] = []
+        if offset < primary_count:
+            primary_slice = primary_shuffled[offset : offset + limit]
+            items.extend(product.to_short() for product in primary_slice)
+            remaining = limit - len(items)
+            if remaining > 0 and use_parent and parent_id is not None:
+                rng_parent = random.Random(product_id.int + 1)  # noqa: S311
+                parent_shuffled = list(parent)
+                rng_parent.shuffle(parent_shuffled)
+                items.extend(product.to_short() for product in parent_shuffled[:remaining])
+        elif use_parent:
+            parent_offset = offset - primary_count
+            rng_parent = random.Random(product_id.int + 1)  # noqa: S311
+            parent_shuffled = list(parent)
+            rng_parent.shuffle(parent_shuffled)
+            parent_slice = parent_shuffled[parent_offset : parent_offset + limit]
+            items.extend(product.to_short() for product in parent_slice)
+
         return ProductShortList(
-            items=items,
+            items=tuple(items),
             total_count=total_count,
             limit=limit,
             offset=offset,
@@ -255,10 +278,22 @@ class HttpCatalogRepository:
             ("limit", str(limit)),
             ("offset", str(offset)),
         ]
-        payload = await self._get_similar(f"/api/v1/products/{product_id}/similar", params)
+        payload = await self._get(
+            f"/api/v1/products/{product_id}/similar",
+            params,
+            error_messages={
+                400: "Nonexistent category id",
+                404: "Product not found",
+            },
+        )
         return _parse_product_short_list(payload)
 
-    async def _get(self, path: str, params: list[tuple[str, str]]) -> dict[str, Any]:
+    async def _get(
+        self,
+        path: str,
+        params: list[tuple[str, str]],
+        error_messages: dict[int, str] | None = None,
+    ) -> dict[str, Any]:
         url = f"{self._base_url}{path}"
         headers = {}
         if self._service_key:
@@ -271,32 +306,12 @@ class HttpCatalogRepository:
 
         if response.status_code in {502, 503}:
             raise UpstreamServiceError("B2B temporarily unavailable", response.status_code)
+        if error_messages and response.status_code in error_messages:
+            raise UpstreamServiceError(error_messages[response.status_code], response.status_code)
         if response.status_code == 404:
             raise UpstreamServiceError("Category not found", response.status_code)
         if response.status_code == 400:
             raise UpstreamServiceError("Invalid upstream request", response.status_code)
-        if response.status_code != 200:
-            raise UpstreamServiceError("Unexpected upstream response", response.status_code)
-
-        return response.json()
-
-    async def _get_similar(self, path: str, params: list[tuple[str, str]]) -> dict[str, Any]:
-        url = f"{self._base_url}{path}"
-        headers = {}
-        if self._service_key:
-            headers["X-Service-Key"] = self._service_key
-        try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                response = await client.get(url, params=params, headers=headers)
-        except httpx.RequestError as exc:
-            raise UpstreamServiceError("Unable to reach B2B", None) from exc
-
-        if response.status_code in {502, 503}:
-            raise UpstreamServiceError("B2B temporarily unavailable", response.status_code)
-        if response.status_code == 404:
-            raise UpstreamServiceError("Product not found", response.status_code)
-        if response.status_code == 400:
-            raise UpstreamServiceError("Nonexistent category id", response.status_code)
         if response.status_code != 200:
             raise UpstreamServiceError("Unexpected upstream response", response.status_code)
 
