@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import random
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -29,6 +30,15 @@ class CatalogRepository(Protocol):
         category_id: UUID,
         filters: dict[str, list[str]] | None,
     ) -> Facets: ...
+
+    async def get_similar_products(
+        self,
+        *,
+        product_id: UUID,
+        category_id: UUID,
+        limit: int,
+        offset: int,
+    ) -> ProductShortList: ...
 
 
 class UpstreamServiceError(RuntimeError):
@@ -69,13 +79,21 @@ class InMemoryCatalogRepository:
         self,
         products: list[CatalogProduct] | None = None,
         categories: set[UUID] | None = None,
+        category_parents: dict[UUID, UUID | None] | None = None,
     ) -> None:
         self._products = products if products is not None else _default_catalog_products()
+        self._product_ids = {product.id for product in self._products}
+        self._category_parents = category_parents or {}
         self._categories = (
             categories
             if categories is not None
             else {product.category_id for product in self._products}
         )
+        if self._category_parents:
+            self._categories.update(self._category_parents.keys())
+            self._categories.update(
+                parent for parent in self._category_parents.values() if parent is not None
+            )
 
     async def list_products(
         self,
@@ -138,6 +156,47 @@ class InMemoryCatalogRepository:
 
         return Facets(category_id=category_id, facets=tuple(facets))
 
+    async def get_similar_products(
+        self,
+        *,
+        product_id: UUID,
+        category_id: UUID,
+        limit: int,
+        offset: int,
+    ) -> ProductShortList:
+        if category_id not in self._categories:
+            raise UpstreamServiceError("Nonexistent category id", 400)
+        if product_id not in self._product_ids:
+            raise UpstreamServiceError("Product not found", 404)
+
+        primary = [
+            product
+            for product in self._products
+            if product.category_id == category_id and product.id != product_id
+        ]
+        candidates = list(primary)
+        required_count = limit + offset
+        parent_id = self._category_parents.get(category_id)
+        if len(primary) < required_count and parent_id is not None:
+            primary_ids = {product.id for product in primary}
+            for product in self._products:
+                if product.category_id != parent_id or product.id == product_id:
+                    continue
+                if product.id in primary_ids:
+                    continue
+                candidates.append(product)
+
+        total_count = len(candidates)
+        random.shuffle(candidates)
+        paginated = candidates[offset : offset + limit]
+        items = tuple(product.to_short() for product in paginated)
+        return ProductShortList(
+            items=items,
+            total_count=total_count,
+            limit=limit,
+            offset=offset,
+        )
+
 
 class HttpCatalogRepository:
     def __init__(
@@ -183,6 +242,22 @@ class HttpCatalogRepository:
         payload = await self._get("/api/v1/catalog/facets", params)
         return _parse_facets(payload)
 
+    async def get_similar_products(
+        self,
+        *,
+        product_id: UUID,
+        category_id: UUID,
+        limit: int,
+        offset: int,
+    ) -> ProductShortList:
+        params = [
+            ("category", str(category_id)),
+            ("limit", str(limit)),
+            ("offset", str(offset)),
+        ]
+        payload = await self._get_similar(f"/api/v1/products/{product_id}/similar", params)
+        return _parse_product_short_list(payload)
+
     async def _get(self, path: str, params: list[tuple[str, str]]) -> dict[str, Any]:
         url = f"{self._base_url}{path}"
         headers = {}
@@ -200,6 +275,28 @@ class HttpCatalogRepository:
             raise UpstreamServiceError("Category not found", response.status_code)
         if response.status_code == 400:
             raise UpstreamServiceError("Invalid upstream request", response.status_code)
+        if response.status_code != 200:
+            raise UpstreamServiceError("Unexpected upstream response", response.status_code)
+
+        return response.json()
+
+    async def _get_similar(self, path: str, params: list[tuple[str, str]]) -> dict[str, Any]:
+        url = f"{self._base_url}{path}"
+        headers = {}
+        if self._service_key:
+            headers["X-Service-Key"] = self._service_key
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                response = await client.get(url, params=params, headers=headers)
+        except httpx.RequestError as exc:
+            raise UpstreamServiceError("Unable to reach B2B", None) from exc
+
+        if response.status_code in {502, 503}:
+            raise UpstreamServiceError("B2B temporarily unavailable", response.status_code)
+        if response.status_code == 404:
+            raise UpstreamServiceError("Product not found", response.status_code)
+        if response.status_code == 400:
+            raise UpstreamServiceError("Nonexistent category id", response.status_code)
         if response.status_code != 200:
             raise UpstreamServiceError("Unexpected upstream response", response.status_code)
 

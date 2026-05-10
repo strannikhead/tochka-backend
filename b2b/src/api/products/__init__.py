@@ -134,6 +134,57 @@ async def update_product(id: str) -> dict[str, str]:
     return {"endpoint": "update_product"}
 
 
+@router.get("/{id}/similar")
+async def get_similar_products(
+    id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    category: str = Query(...),
+    limit: int = Query(8, ge=1, le=20),
+    offset: int = Query(0, ge=0),
+) -> JSONResponse:
+    try:
+        product_id = UUID(id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Некорректный id товара") from exc
+
+    try:
+        category_id = UUID(category)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Nonexistent category id") from exc
+
+    if not await _category_exists(session, category_id):
+        raise HTTPException(status_code=400, detail="Nonexistent category id")
+
+    if not await _product_exists(session, product_id):
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    required_count = limit + offset
+    category_ids = [category_id]
+    primary_count = await _count_similar_products(session, category_ids, product_id)
+    parent_id = await _category_parent_id(session, category_id)
+    if primary_count < required_count and parent_id is not None:
+        category_ids = [category_id, parent_id]
+
+    total_count = await _count_similar_products(session, category_ids, product_id)
+    rows = await _fetch_similar_products(
+        session,
+        category_ids=category_ids,
+        product_id=product_id,
+        limit=limit,
+        offset=offset,
+    )
+    items = [_row_to_item(row) for row in rows]
+
+    return JSONResponse(
+        content={
+            "items": items,
+            "total_count": total_count,
+            "limit": limit,
+            "offset": offset,
+        }
+    )
+
+
 def _parse_filters(request: Request) -> dict[str, list[str]]:
     filters: dict[str, list[str]] = {}
     for key, value in request.query_params.multi_items():
@@ -157,6 +208,18 @@ async def _category_exists(session: AsyncSession, category_id: UUID) -> bool:
     stmt = select(func.count()).select_from(Category).where(Category.id == category_id)
     result = await session.execute(stmt)
     return result.scalar_one() > 0
+
+
+async def _product_exists(session: AsyncSession, product_id: UUID) -> bool:
+    stmt = select(func.count()).select_from(Product).where(Product.id == product_id)
+    result = await session.execute(stmt)
+    return result.scalar_one() > 0
+
+
+async def _category_parent_id(session: AsyncSession, category_id: UUID) -> UUID | None:
+    stmt = select(Category.parent_id).where(Category.id == category_id)
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
 
 
 async def _count_products(
@@ -254,6 +317,53 @@ def _row_to_item(row: tuple[Product, int, int]) -> dict[str, Any]:
         "in_stock": bool(max_qty),
         "is_in_cart": False,
     }
+
+
+def _similar_products_subquery(category_ids: list[UUID], product_id: UUID):
+    stmt = (
+        select(
+            Product,
+            func.max(SKU.active_quantity).label("max_qty"),
+            func.min(SKU.price).label("min_price"),
+        )
+        .join(SKU)
+        .where(Product.status == ProductStatus.MODERATED)
+        .where(SKU.active_quantity > 0)
+        .where(Product.id != product_id)
+        .where(Product.category_id.in_(category_ids))
+        .group_by(Product.id)
+    )
+    return stmt.subquery()
+
+
+async def _count_similar_products(
+    session: AsyncSession, category_ids: list[UUID], product_id: UUID
+) -> int:
+    subquery = _similar_products_subquery(category_ids, product_id)
+    stmt = select(func.count()).select_from(subquery)
+    result = await session.execute(stmt)
+    return int(result.scalar_one())
+
+
+async def _fetch_similar_products(
+    session: AsyncSession,
+    *,
+    category_ids: list[UUID],
+    product_id: UUID,
+    limit: int,
+    offset: int,
+) -> list[tuple[Product, int, int]]:
+    subquery = _similar_products_subquery(category_ids, product_id)
+    product_alias = aliased(Product, subquery)
+    stmt = (
+        select(product_alias, subquery.c.max_qty, subquery.c.min_price)
+        .select_from(subquery)
+        .order_by(func.random())
+        .limit(limit)
+        .offset(offset)
+    )
+    result = await session.execute(stmt)
+    return [(row[0], row[1], row[2]) for row in result.all()]
 
 
 def _extract_image(images: list | None) -> str:
