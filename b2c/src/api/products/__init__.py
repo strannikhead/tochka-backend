@@ -106,9 +106,36 @@ async def get_product(
     return ProductResponse.from_domain(product)
 
 
-@router.get("/{id}/similar")
-async def get_similar_products(id: str) -> dict[str, str]:
-    return {"endpoint": "get_similar_products"}
+@router.get("/{id}/similar", response_model=ProductShortListResponse)
+async def get_similar_products(
+    id: str,
+    repository: Annotated[CatalogRepository, Depends(get_catalog_repository)],
+    category: str = Query(...),
+    limit: int = Query(8, ge=1, le=20),
+    offset: int = Query(0, ge=0),
+) -> ProductShortListResponse | JSONResponse:
+    try:
+        product_id = UUID(id)
+    except ValueError:
+        return JSONResponse(status_code=400, content={"message": "Некорректный id товара"})
+
+    try:
+        category_id = UUID(category)
+    except ValueError:
+        return JSONResponse(status_code=400, content={"message": "Некорректный id категории"})
+
+    try:
+        similar = await repository.get_similar_products(
+            product_id=product_id,
+            category_id=category_id,
+            limit=limit,
+            offset=offset,
+        )
+    except UpstreamServiceError as exc:
+        status_code = 502 if exc.status_code is None else exc.status_code
+        return JSONResponse(status_code=status_code, content={"message": str(exc)})
+
+    return ProductShortListResponse.from_domain(similar)
 
 
 @router.get("/{product_id}/skus")

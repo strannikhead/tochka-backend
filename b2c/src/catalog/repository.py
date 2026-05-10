@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import random
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -29,6 +30,15 @@ class CatalogRepository(Protocol):
         category_id: UUID,
         filters: dict[str, list[str]] | None,
     ) -> Facets: ...
+
+    async def get_similar_products(
+        self,
+        *,
+        product_id: UUID,
+        category_id: UUID,
+        limit: int,
+        offset: int,
+    ) -> ProductShortList: ...
 
 
 class UpstreamServiceError(RuntimeError):
@@ -69,13 +79,21 @@ class InMemoryCatalogRepository:
         self,
         products: list[CatalogProduct] | None = None,
         categories: set[UUID] | None = None,
+        category_parents: dict[UUID, UUID | None] | None = None,
     ) -> None:
         self._products = products if products is not None else _default_catalog_products()
+        self._product_ids = {product.id for product in self._products}
+        self._category_parents = category_parents or {}
         self._categories = (
             categories
             if categories is not None
             else {product.category_id for product in self._products}
         )
+        if self._category_parents:
+            self._categories.update(self._category_parents.keys())
+            self._categories.update(
+                parent for parent in self._category_parents.values() if parent is not None
+            )
 
     async def list_products(
         self,
@@ -138,6 +156,70 @@ class InMemoryCatalogRepository:
 
         return Facets(category_id=category_id, facets=tuple(facets))
 
+    async def get_similar_products(
+        self,
+        *,
+        product_id: UUID,
+        category_id: UUID,
+        limit: int,
+        offset: int,
+    ) -> ProductShortList:
+        if category_id not in self._categories:
+            raise UpstreamServiceError("Nonexistent category id", 400)
+        if product_id not in self._product_ids:
+            raise UpstreamServiceError("Product not found", 404)
+
+        primary = [
+            product
+            for product in self._products
+            if product.category_id == category_id and product.id != product_id
+        ]
+        primary_count = len(primary)
+        parent_id = self._category_parents.get(category_id)
+        parent = []
+        if parent_id is not None:
+            primary_ids = {product.id for product in primary}
+            parent = [
+                product
+                for product in self._products
+                if product.category_id == parent_id
+                and product.id != product_id
+                and product.id not in primary_ids
+            ]
+
+        required_count = limit + offset
+        use_parent = parent_id is not None and primary_count < required_count
+        total_count = primary_count + (len(parent) if use_parent else 0)
+
+        rng = random.Random(product_id.int)  # noqa: S311 # nosec B311
+        primary_shuffled = list(primary)
+        rng.shuffle(primary_shuffled)
+
+        items: list[ProductShort] = []
+        if offset < primary_count:
+            primary_slice = primary_shuffled[offset : offset + limit]
+            items.extend(product.to_short() for product in primary_slice)
+            remaining = limit - len(items)
+            if remaining > 0 and use_parent and parent_id is not None:
+                rng_parent = random.Random(product_id.int + 1)  # noqa: S311 # nosec B311
+                parent_shuffled = list(parent)
+                rng_parent.shuffle(parent_shuffled)
+                items.extend(product.to_short() for product in parent_shuffled[:remaining])
+        elif use_parent:
+            parent_offset = offset - primary_count
+            rng_parent = random.Random(product_id.int + 1)  # noqa: S311 # nosec B311
+            parent_shuffled = list(parent)
+            rng_parent.shuffle(parent_shuffled)
+            parent_slice = parent_shuffled[parent_offset : parent_offset + limit]
+            items.extend(product.to_short() for product in parent_slice)
+
+        return ProductShortList(
+            items=tuple(items),
+            total_count=total_count,
+            limit=limit,
+            offset=offset,
+        )
+
 
 class HttpCatalogRepository:
     def __init__(
@@ -183,7 +265,35 @@ class HttpCatalogRepository:
         payload = await self._get("/api/v1/catalog/facets", params)
         return _parse_facets(payload)
 
-    async def _get(self, path: str, params: list[tuple[str, str]]) -> dict[str, Any]:
+    async def get_similar_products(
+        self,
+        *,
+        product_id: UUID,
+        category_id: UUID,
+        limit: int,
+        offset: int,
+    ) -> ProductShortList:
+        params = [
+            ("category", str(category_id)),
+            ("limit", str(limit)),
+            ("offset", str(offset)),
+        ]
+        payload = await self._get(
+            f"/api/v1/products/{product_id}/similar",
+            params,
+            error_messages={
+                400: "Nonexistent category id",
+                404: "Product not found",
+            },
+        )
+        return _parse_product_short_list(payload)
+
+    async def _get(
+        self,
+        path: str,
+        params: list[tuple[str, str]],
+        error_messages: dict[int, str] | None = None,
+    ) -> dict[str, Any]:
         url = f"{self._base_url}{path}"
         headers = {}
         if self._service_key:
@@ -196,6 +306,8 @@ class HttpCatalogRepository:
 
         if response.status_code in {502, 503}:
             raise UpstreamServiceError("B2B temporarily unavailable", response.status_code)
+        if error_messages and response.status_code in error_messages:
+            raise UpstreamServiceError(error_messages[response.status_code], response.status_code)
         if response.status_code == 404:
             raise UpstreamServiceError("Category not found", response.status_code)
         if response.status_code == 400:
