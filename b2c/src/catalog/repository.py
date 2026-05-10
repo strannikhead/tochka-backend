@@ -191,7 +191,7 @@ class InMemoryCatalogRepository:
         use_parent = parent_id is not None and primary_count < required_count
         total_count = primary_count + (len(parent) if use_parent else 0)
 
-        rng = random.Random(product_id.int)  # noqa: S311
+        rng = random.Random(product_id.int)  # noqa: S311 # nosec B311
         primary_shuffled = list(primary)
         rng.shuffle(primary_shuffled)
 
@@ -201,13 +201,13 @@ class InMemoryCatalogRepository:
             items.extend(product.to_short() for product in primary_slice)
             remaining = limit - len(items)
             if remaining > 0 and use_parent and parent_id is not None:
-                rng_parent = random.Random(product_id.int + 1)  # noqa: S311
+                rng_parent = random.Random(product_id.int + 1)  # noqa: S311 # nosec B311
                 parent_shuffled = list(parent)
                 rng_parent.shuffle(parent_shuffled)
                 items.extend(product.to_short() for product in parent_shuffled[:remaining])
         elif use_parent:
             parent_offset = offset - primary_count
-            rng_parent = random.Random(product_id.int + 1)  # noqa: S311
+            rng_parent = random.Random(product_id.int + 1)  # noqa: S311 # nosec B311
             parent_shuffled = list(parent)
             rng_parent.shuffle(parent_shuffled)
             parent_slice = parent_shuffled[parent_offset : parent_offset + limit]
