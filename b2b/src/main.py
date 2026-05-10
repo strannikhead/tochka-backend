@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api import categories, invoices, products, skus
+from b2b.src.api import categories, invoices, products, skus
 
 app = FastAPI(title="B2B Seller Cabinet")
 

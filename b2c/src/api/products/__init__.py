@@ -57,7 +57,7 @@ async def list_products(
         if len(trimmed) > 255:
             return JSONResponse(
                 status_code=400,
-                content={"message": "Search query is too long"},
+                content={"message": "Search query must be at most 255 characters"},
             )
 
     # normalize search for repository call: use trimmed string or None
