@@ -30,10 +30,12 @@ def build_product(
     price: int,
     rating: float,
     popularity: int,
+    description: str = "Sample description",
 ) -> CatalogProduct:
     return CatalogProduct(
         id=product_id,
         title=title,
+        description=description,
         image="https://example.com/images/item.jpg",
         price=price,
         in_stock=True,

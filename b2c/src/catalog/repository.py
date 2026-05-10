@@ -41,6 +41,7 @@ class UpstreamServiceError(RuntimeError):
 class CatalogProduct:
     id: UUID
     title: str
+    description: str
     image: str
     price: int
     in_stock: bool
@@ -225,7 +226,8 @@ def _matches_filters(product: CatalogProduct, filters: dict[str, list[str]]) -> 
 def _matches_search(product: CatalogProduct, search: str | None) -> bool:
     if not search:
         return True
-    return search.lower() in product.title.lower()
+    normalized = search.lower()
+    return normalized in product.title.lower() or normalized in product.description.lower()
 
 
 def _sort_products(products: list[CatalogProduct], sort: str | None) -> list[CatalogProduct]:
@@ -337,6 +339,7 @@ def _default_catalog_products() -> list[CatalogProduct]:
         CatalogProduct(
             id=UUID("770e8400-e29b-41d4-a716-446655440002"),
             title="iPhone 15 Pro Max",
+            description="Флагманский смартфон Apple 2024 года с чипом A17 Pro",
             image="https://example.com/images/iphone15.jpg",
             price=12999000,
             in_stock=True,
@@ -351,6 +354,7 @@ def _default_catalog_products() -> list[CatalogProduct]:
         CatalogProduct(
             id=UUID("770e8400-e29b-41d4-a716-446655440003"),
             title="Samsung Galaxy S24",
+            description="Смартфон Samsung с OLED-экраном и улучшенной камерой",
             image="https://example.com/images/s24.jpg",
             price=8999000,
             in_stock=True,
@@ -365,6 +369,7 @@ def _default_catalog_products() -> list[CatalogProduct]:
         CatalogProduct(
             id=UUID("770e8400-e29b-41d4-a716-446655440004"),
             title="Xiaomi Redmi Note",
+            description="Доступный смартфон с большим экраном и батареей",
             image="https://example.com/images/redmi.jpg",
             price=3999000,
             in_stock=True,
@@ -379,6 +384,7 @@ def _default_catalog_products() -> list[CatalogProduct]:
         CatalogProduct(
             id=UUID("770e8400-e29b-41d4-a716-446655440010"),
             title="NeoVision 55",
+            description='Телевизор 55" с поддержкой HDR и Smart TV',
             image="https://example.com/images/tv.jpg",
             price=5499000,
             in_stock=True,
