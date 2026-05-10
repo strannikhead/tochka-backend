@@ -15,7 +15,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -69,6 +69,11 @@ class User(Base):
         "Address", back_populates="user", cascade="all, delete-orphan"
     )
     orders: Mapped[list[Order]] = relationship("Order", back_populates="user")
+    product_subscriptions: Mapped[list[ProductSubscription]] = relationship(
+        "ProductSubscription",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
 
 
 class Favorite(Base):
@@ -88,6 +93,32 @@ class Favorite(Base):
 
     # Relationships
     user: Mapped[User] = relationship("User", back_populates="favorites")
+
+
+class ProductSubscription(Base):
+    """Product notification subscription model."""
+
+    __tablename__ = "product_subscriptions"
+    __table_args__ = tuple(
+        UniqueConstraint("user_id", "product_id", name="uq_product_subscription_user_product")
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
+    )
+
+    product_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+
+    notify_on: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+    # Relationships
+    user: Mapped[User] = relationship("User", back_populates="product_subscriptions")
 
 
 class CartItem(Base):
