@@ -24,7 +24,8 @@ class InMemoryFavoriteRepository:
         self._data: dict[tuple[UUID, UUID], FavoriteEntry] = {}
 
     async def get_user_favorites(self, user_id: UUID) -> list[FavoriteEntry]:
-        return [e for e in self._data.values() if e.user_id == user_id]
+        entries = [e for e in self._data.values() if e.user_id == user_id]
+        return sorted(entries, key=lambda e: e.added_at, reverse=True)
 
     async def add_favorite(self, user_id: UUID, product_id: UUID) -> tuple[FavoriteEntry, bool]:
         key = (user_id, product_id)
@@ -61,7 +62,7 @@ class DbFavoriteRepository:
             .on_conflict_do_nothing(constraint="uq_favorites_user_product")
         )
         result = await self._session.execute(stmt)
-        await self._session.commit()
+        await self._session.flush()
 
         if result.rowcount > 0:
             return FavoriteEntry(user_id=user_id, product_id=product_id, added_at=now), True
@@ -89,4 +90,4 @@ class DbFavoriteRepository:
                 FavoriteRow.product_id == product_id,
             )
         )
-        await self._session.commit()
+        await self._session.flush()
