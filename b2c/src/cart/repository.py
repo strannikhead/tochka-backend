@@ -1,0 +1,204 @@
+from __future__ import annotations
+
+import uuid
+from datetime import UTC, datetime
+from typing import Protocol
+
+from src.cart.domain import CartItemStored
+
+
+class CartRepository(Protocol):
+    async def get_items(
+        self, *, user_id: uuid.UUID | None, session_id: str | None
+    ) -> list[CartItemStored]: ...
+
+    async def get_item(
+        self, *, item_id: uuid.UUID, user_id: uuid.UUID | None, session_id: str | None
+    ) -> CartItemStored | None: ...
+
+    async def upsert_item(
+        self,
+        *,
+        user_id: uuid.UUID | None,
+        session_id: str | None,
+        sku_id: uuid.UUID,
+        quantity: int,
+    ) -> tuple[CartItemStored, bool]: ...
+
+    async def set_item_quantity(
+        self,
+        *,
+        item_id: uuid.UUID,
+        user_id: uuid.UUID | None,
+        session_id: str | None,
+        quantity: int,
+    ) -> CartItemStored | None: ...
+
+    async def delete_item(
+        self, *, item_id: uuid.UUID, user_id: uuid.UUID | None, session_id: str | None
+    ) -> bool: ...
+
+    async def clear(
+        self, *, user_id: uuid.UUID | None, session_id: str | None
+    ) -> None: ...
+
+    async def merge_guest_into_user(
+        self, *, session_id: str, user_id: uuid.UUID
+    ) -> None: ...
+
+
+class InMemoryCartRepository:
+    def __init__(self, items: dict[uuid.UUID, CartItemStored] | None = None) -> None:
+        self._items: dict[uuid.UUID, CartItemStored] = items if items is not None else {}
+
+    def _matches(
+        self, item: CartItemStored, user_id: uuid.UUID | None, session_id: str | None
+    ) -> bool:
+        if user_id is not None:
+            return item.user_id == user_id
+        return item.session_id == session_id
+
+    async def get_items(
+        self, *, user_id: uuid.UUID | None, session_id: str | None
+    ) -> list[CartItemStored]:
+        return [item for item in self._items.values() if self._matches(item, user_id, session_id)]
+
+    async def get_item(
+        self, *, item_id: uuid.UUID, user_id: uuid.UUID | None, session_id: str | None
+    ) -> CartItemStored | None:
+        item = self._items.get(item_id)
+        if item is None or not self._matches(item, user_id, session_id):
+            return None
+        return item
+
+    async def upsert_item(
+        self,
+        *,
+        user_id: uuid.UUID | None,
+        session_id: str | None,
+        sku_id: uuid.UUID,
+        quantity: int,
+    ) -> tuple[CartItemStored, bool]:
+        existing = next(
+            (
+                item
+                for item in self._items.values()
+                if self._matches(item, user_id, session_id) and item.sku_id == sku_id
+            ),
+            None,
+        )
+        now = datetime.now(UTC)
+        if existing is not None:
+            updated = CartItemStored(
+                id=existing.id,
+                user_id=existing.user_id,
+                session_id=existing.session_id,
+                sku_id=existing.sku_id,
+                quantity=existing.quantity + quantity,
+                added_at=existing.added_at,
+                updated_at=now,
+            )
+            self._items[updated.id] = updated
+            return updated, False
+
+        new_item = CartItemStored(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            session_id=session_id,
+            sku_id=sku_id,
+            quantity=quantity,
+            added_at=now,
+            updated_at=now,
+        )
+        self._items[new_item.id] = new_item
+        return new_item, True
+
+    async def set_item_quantity(
+        self,
+        *,
+        item_id: uuid.UUID,
+        user_id: uuid.UUID | None,
+        session_id: str | None,
+        quantity: int,
+    ) -> CartItemStored | None:
+        item = self._items.get(item_id)
+        if item is None or not self._matches(item, user_id, session_id):
+            return None
+        updated = CartItemStored(
+            id=item.id,
+            user_id=item.user_id,
+            session_id=item.session_id,
+            sku_id=item.sku_id,
+            quantity=quantity,
+            added_at=item.added_at,
+            updated_at=datetime.now(UTC),
+        )
+        self._items[updated.id] = updated
+        return updated
+
+    async def delete_item(
+        self, *, item_id: uuid.UUID, user_id: uuid.UUID | None, session_id: str | None
+    ) -> bool:
+        item = self._items.get(item_id)
+        if item is None or not self._matches(item, user_id, session_id):
+            return False
+        del self._items[item_id]
+        return True
+
+    async def clear(
+        self, *, user_id: uuid.UUID | None, session_id: str | None
+    ) -> None:
+        to_delete = [
+            item_id
+            for item_id, item in self._items.items()
+            if self._matches(item, user_id, session_id)
+        ]
+        for item_id in to_delete:
+            del self._items[item_id]
+
+    async def merge_guest_into_user(
+        self, *, session_id: str, user_id: uuid.UUID
+    ) -> None:
+        guest_items = [
+            item for item in self._items.values() if item.session_id == session_id
+        ]
+        now = datetime.now(UTC)
+        for guest_item in guest_items:
+            user_item = next(
+                (
+                    item
+                    for item in self._items.values()
+                    if item.user_id == user_id and item.sku_id == guest_item.sku_id
+                ),
+                None,
+            )
+            if user_item is not None:
+                merged = CartItemStored(
+                    id=user_item.id,
+                    user_id=user_item.user_id,
+                    session_id=None,
+                    sku_id=user_item.sku_id,
+                    quantity=max(user_item.quantity, guest_item.quantity),
+                    added_at=user_item.added_at,
+                    updated_at=now,
+                )
+                self._items[user_item.id] = merged
+            else:
+                transferred = CartItemStored(
+                    id=guest_item.id,
+                    user_id=user_id,
+                    session_id=None,
+                    sku_id=guest_item.sku_id,
+                    quantity=guest_item.quantity,
+                    added_at=guest_item.added_at,
+                    updated_at=now,
+                )
+                self._items[transferred.id] = transferred
+
+        to_delete = [
+            item_id
+            for item_id, item in self._items.items()
+            if item.session_id == session_id
+        ]
+        for item_id in to_delete:
+            del self._items[item_id]
