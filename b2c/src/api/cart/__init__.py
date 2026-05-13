@@ -25,17 +25,24 @@ router = APIRouter(tags=["cart"])
 CartRepo = Annotated[CartRepository, Depends(get_cart_repository)]
 B2BClient = Annotated[B2BCartClient, Depends(get_b2b_cart_client)]
 
-_MISSING_IDENTITY = JSONResponse(
-    status_code=400,
-    content={"code": "MISSING_CART_IDENTITY", "message": "Передайте X-User-Id или X-Session-Id"},
-)
-_SERVICE_UNAVAILABLE = JSONResponse(
-    status_code=503,
-    content={
-        "code": "SERVICE_UNAVAILABLE",
-        "message": "Сервис временно недоступен, попробуйте позже",
-    },
-)
+def _missing_identity() -> JSONResponse:
+    return JSONResponse(
+        status_code=400,
+        content={
+            "code": "MISSING_CART_IDENTITY",
+            "message": "Передайте X-User-Id или X-Session-Id",
+        },
+    )
+
+
+def _service_unavailable() -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={
+            "code": "SERVICE_UNAVAILABLE",
+            "message": "Сервис временно недоступен, попробуйте позже",
+        },
+    )
 
 
 def _extract_identity(
@@ -55,7 +62,7 @@ def _extract_identity(
         return user_id, None
     session_id = x_session_id or None
     if session_id is None:
-        return _MISSING_IDENTITY
+        return _missing_identity()
     return None, session_id
 
 
@@ -85,7 +92,7 @@ async def get_cart(
     stored = await repo.get_items(user_id=user_id, session_id=session_id)
     enriched = await _enrich_all(stored, b2b)
     if enriched is None:
-        return _SERVICE_UNAVAILABLE
+        return _service_unavailable()
 
     return CartResponseSchema(
         items=[CartItemSchema.from_domain(item) for item in enriched],
@@ -123,7 +130,7 @@ async def add_cart_item(
     try:
         sku_data, error_code = await b2b.check_sku_for_add(body.sku_id, body.quantity)
     except B2BCartError:
-        return _SERVICE_UNAVAILABLE
+        return _service_unavailable()
 
     if error_code == "SKU_NOT_FOUND":
         return JSONResponse(
@@ -153,10 +160,20 @@ async def add_cart_item(
     )
     enriched_item = enrich_item(stored, sku_data)
 
+    # Build summary from all cart items; sku_data for the current item is already known.
+    # If B2B fails for other items we still return success — the upsert happened —
+    # but summary is built only from items we could enrich.
     all_stored = await repo.get_items(user_id=user_id, session_id=session_id)
-    all_enriched = await _enrich_all(all_stored, b2b)
-    if all_enriched is None:
-        all_enriched = [enriched_item]
+    all_enriched: list = []
+    for s in all_stored:
+        if s.id == stored.id:
+            all_enriched.append(enriched_item)
+            continue
+        try:
+            d = await b2b.get_sku_data(s.sku_id)
+        except B2BCartError:
+            d = None
+        all_enriched.append(enrich_item(s, d))
 
     message = "Позиция добавлена в корзину" if is_new else "Количество в корзине увеличено"
     response = CartMutationResponseSchema(
@@ -190,7 +207,7 @@ async def get_cart_item(
     try:
         sku_data = await b2b.get_sku_data(stored.sku_id)
     except B2BCartError:
-        return _SERVICE_UNAVAILABLE
+        return _service_unavailable()
     return CartItemSchema.from_domain(enrich_item(stored, sku_data))
 
 
@@ -218,7 +235,7 @@ async def update_cart_item(
     try:
         sku_data, error_code = await b2b.check_sku_for_add(stored.sku_id, body.quantity)
     except B2BCartError:
-        return _SERVICE_UNAVAILABLE
+        return _service_unavailable()
 
     if error_code == "SKU_NOT_AVAILABLE":
         return JSONResponse(
@@ -252,14 +269,21 @@ async def update_cart_item(
 
     enriched_item = enrich_item(updated, sku_data)
     all_stored = await repo.get_items(user_id=user_id, session_id=session_id)
-    all_enriched = await _enrich_all(all_stored, b2b)
-    if all_enriched is None:
-        all_enriched = [enriched_item]
+    all_enriched_put: list = []
+    for s in all_stored:
+        if s.id == item_id:
+            all_enriched_put.append(enriched_item)
+            continue
+        try:
+            d = await b2b.get_sku_data(s.sku_id)
+        except B2BCartError:
+            d = None
+        all_enriched_put.append(enrich_item(s, d))
 
     return CartMutationResponseSchema(
         message="Количество обновлено",
         item=CartItemSchema.from_domain(enriched_item),
-        summary=build_summary(all_enriched),
+        summary=build_summary(all_enriched_put),
     )
 
 
