@@ -30,7 +30,12 @@ async def list_favorites(
     return FavoritesListResponse.from_domain(items, total)
 
 
-@router.post("/{product_id}", status_code=201, response_model=FavoriteMutationResponse)
+@router.post(
+    "/{product_id}",
+    status_code=201,
+    response_model=FavoriteMutationResponse,
+    responses={200: {"model": FavoriteMutationResponse}},
+)
 async def add_to_favorites(
     product_id: str,
     response: Response,
@@ -40,7 +45,7 @@ async def add_to_favorites(
     try:
         pid = UUID(product_id)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Некорректный product_id") from exc
+        raise HTTPException(status_code=400, detail="Некорректный UUID product_id") from exc
 
     entry, created = await service.add(user_id, pid)
     if not created:
@@ -57,7 +62,7 @@ async def remove_from_favorites(
     try:
         pid = UUID(product_id)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Некорректный product_id") from exc
+        raise HTTPException(status_code=400, detail="Некорректный UUID product_id") from exc
     await service.remove(user_id, pid)
 
 

@@ -44,7 +44,9 @@ class DbFavoriteRepository:
 
     async def get_user_favorites(self, user_id: UUID) -> list[FavoriteEntry]:
         result = await self._session.execute(
-            select(FavoriteRow).where(FavoriteRow.user_id == user_id)
+            select(FavoriteRow)
+            .where(FavoriteRow.user_id == user_id)
+            .order_by(FavoriteRow.added_at.desc())
         )
         return [
             FavoriteEntry(user_id=row.user_id, product_id=row.product_id, added_at=row.added_at)
@@ -71,7 +73,10 @@ class DbFavoriteRepository:
                 FavoriteRow.product_id == product_id,
             )
         )
-        row = existing.scalar_one()
+        row = existing.scalar_one_or_none()
+        if row is None:
+            # Гонка: запись удалили между нашим INSERT и SELECT — возвращаем как «не существовало»
+            return FavoriteEntry(user_id=user_id, product_id=product_id, added_at=now), False
         return (
             FavoriteEntry(user_id=row.user_id, product_id=row.product_id, added_at=row.added_at),
             False,

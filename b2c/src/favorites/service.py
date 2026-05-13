@@ -30,8 +30,14 @@ class FavoritesService:
         if not entries:
             return [], 0
 
+        sem = asyncio.Semaphore(20)
+
+        async def _fetch(product_id: UUID) -> object:
+            async with sem:
+                return await self._product_repo.get_product(product_id)
+
         results = await asyncio.gather(
-            *[self._product_repo.get_product(e.product_id) for e in entries],
+            *[_fetch(e.product_id) for e in entries],
             return_exceptions=True,
         )
 
