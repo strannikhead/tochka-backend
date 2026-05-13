@@ -5,7 +5,6 @@ from typing import Annotated
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from src.cart.b2b_client import B2BCartClient, HttpB2BCartClient, InMemoryB2BCartClient
 from src.cart.repository import CartRepository, DbCartRepository
 from src.database import get_session
