@@ -5,7 +5,6 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header
 from fastapi.responses import JSONResponse
-
 from src.api.cart.dependencies import get_b2b_cart_client, get_cart_repository
 from src.api.cart.schemas import (
     AddCartItemRequest,
@@ -32,7 +31,10 @@ _MISSING_IDENTITY = JSONResponse(
 )
 _SERVICE_UNAVAILABLE = JSONResponse(
     status_code=503,
-    content={"code": "SERVICE_UNAVAILABLE", "message": "Сервис временно недоступен, попробуйте позже"},
+    content={
+        "code": "SERVICE_UNAVAILABLE",
+        "message": "Сервис временно недоступен, попробуйте позже",
+    },
 )
 
 
@@ -137,7 +139,10 @@ async def add_cart_item(
         available = sku_data.stock_quantity if sku_data else 0
         return JSONResponse(
             status_code=422,
-            content={"code": "INSUFFICIENT_STOCK", "message": f"Нельзя добавить {body.quantity}, доступно только {available}"},
+            content={
+                "code": "INSUFFICIENT_STOCK",
+                "message": f"Нельзя добавить {body.quantity}, доступно только {available}",
+            },
         )
 
     stored, is_new = await repo.upsert_item(
@@ -218,13 +223,19 @@ async def update_cart_item(
     if error_code == "SKU_NOT_AVAILABLE":
         return JSONResponse(
             status_code=410,
-            content={"code": "PRODUCT_NOT_AVAILABLE", "message": "Товар недоступен и не может быть обновлён"},
+            content={
+                "code": "PRODUCT_NOT_AVAILABLE",
+                "message": "Товар недоступен и не может быть обновлён",
+            },
         )
     if error_code == "INSUFFICIENT_STOCK":
         available = sku_data.stock_quantity if sku_data else 0
         return JSONResponse(
             status_code=422,
-            content={"code": "INSUFFICIENT_STOCK", "message": f"Нельзя установить {body.quantity}, доступно только {available}"},
+            content={
+                "code": "INSUFFICIENT_STOCK",
+                "message": f"Нельзя установить {body.quantity}, доступно только {available}",
+            },
         )
 
     updated = await repo.set_item_quantity(

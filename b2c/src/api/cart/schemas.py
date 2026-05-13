@@ -3,7 +3,6 @@ from __future__ import annotations
 import uuid
 
 from pydantic import BaseModel, field_validator
-
 from src.cart.domain import CartItemEnriched
 
 

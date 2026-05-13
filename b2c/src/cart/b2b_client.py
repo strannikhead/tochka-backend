@@ -5,7 +5,6 @@ from typing import Any, Protocol
 from uuid import UUID
 
 import httpx
-
 from src.cart.domain import B2BSkuData
 
 
