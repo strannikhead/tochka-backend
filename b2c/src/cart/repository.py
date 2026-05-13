@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Protocol
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from src.cart.domain import CartItemStored
 
 if TYPE_CHECKING:
