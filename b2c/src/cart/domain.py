@@ -44,12 +44,15 @@ class CartItemEnriched:
     unavailable_reason: str | None
 
 
+_NIL_UUID = uuid.UUID(int=0)
+
+
 def enrich_item(stored: CartItemStored, sku_data: B2BSkuData | None) -> CartItemEnriched:
     if sku_data is None:
         return CartItemEnriched(
             item_id=stored.id,
             sku_id=stored.sku_id,
-            product_id=stored.sku_id,
+            product_id=_NIL_UUID,
             product_title="",
             sku_name="",
             image_url=None,

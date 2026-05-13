@@ -1,17 +1,10 @@
 from __future__ import annotations
 
-import sys
 from datetime import UTC, datetime
-from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-
-PROJECT_PATH = Path(__file__).resolve().parents[1]
-if str(PROJECT_PATH) not in sys.path:
-    sys.path.insert(0, str(PROJECT_PATH))
-
 from src.api.cart.dependencies import get_b2b_cart_client, get_cart_repository
 from src.cart.b2b_client import InMemoryB2BCartClient
 from src.cart.domain import B2BSkuData, CartItemStored

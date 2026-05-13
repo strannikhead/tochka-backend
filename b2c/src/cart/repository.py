@@ -2,9 +2,27 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.cart.domain import CartItemStored
+
+if TYPE_CHECKING:
+    from src.models import CartItem as CartItemModel
+
+
+def _to_domain(row: CartItemModel) -> CartItemStored:
+    return CartItemStored(
+        id=row.id,
+        user_id=row.user_id,
+        session_id=row.session_id,
+        sku_id=row.sku_id,
+        quantity=row.quantity,
+        added_at=row.added_at,
+        updated_at=row.updated_at,
+    )
 
 
 class CartRepository(Protocol):
@@ -202,3 +220,158 @@ class InMemoryCartRepository:
         ]
         for item_id in to_delete:
             del self._items[item_id]
+
+
+class DbCartRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    def _owner_clause(self, user_id: uuid.UUID | None, session_id: str | None):
+        from src.models import CartItem
+
+        if user_id is not None:
+            return CartItem.user_id == user_id
+        return CartItem.session_id == session_id
+
+    async def get_items(
+        self, *, user_id: uuid.UUID | None, session_id: str | None
+    ) -> list[CartItemStored]:
+        from src.models import CartItem
+
+        result = await self._session.execute(
+            select(CartItem).where(self._owner_clause(user_id, session_id))
+        )
+        return [_to_domain(row) for row in result.scalars()]
+
+    async def get_item(
+        self, *, item_id: uuid.UUID, user_id: uuid.UUID | None, session_id: str | None
+    ) -> CartItemStored | None:
+        from src.models import CartItem
+
+        result = await self._session.execute(
+            select(CartItem).where(
+                CartItem.id == item_id,
+                self._owner_clause(user_id, session_id),
+            )
+        )
+        row = result.scalar_one_or_none()
+        return _to_domain(row) if row is not None else None
+
+    async def upsert_item(
+        self,
+        *,
+        user_id: uuid.UUID | None,
+        session_id: str | None,
+        sku_id: uuid.UUID,
+        quantity: int,
+    ) -> tuple[CartItemStored, bool]:
+        from src.models import CartItem
+
+        result = await self._session.execute(
+            select(CartItem).where(
+                self._owner_clause(user_id, session_id),
+                CartItem.sku_id == sku_id,
+            )
+        )
+        existing = result.scalar_one_or_none()
+        now = datetime.now(UTC)
+        if existing is not None:
+            existing.quantity += quantity
+            existing.updated_at = now
+            await self._session.commit()
+            return _to_domain(existing), False
+
+        new_item = CartItem(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            session_id=session_id,
+            sku_id=sku_id,
+            quantity=quantity,
+            added_at=now,
+            updated_at=now,
+        )
+        self._session.add(new_item)
+        await self._session.commit()
+        return _to_domain(new_item), True
+
+    async def set_item_quantity(
+        self,
+        *,
+        item_id: uuid.UUID,
+        user_id: uuid.UUID | None,
+        session_id: str | None,
+        quantity: int,
+    ) -> CartItemStored | None:
+        from src.models import CartItem
+
+        result = await self._session.execute(
+            select(CartItem).where(
+                CartItem.id == item_id,
+                self._owner_clause(user_id, session_id),
+            )
+        )
+        item = result.scalar_one_or_none()
+        if item is None:
+            return None
+        item.quantity = quantity
+        item.updated_at = datetime.now(UTC)
+        await self._session.commit()
+        return _to_domain(item)
+
+    async def delete_item(
+        self, *, item_id: uuid.UUID, user_id: uuid.UUID | None, session_id: str | None
+    ) -> bool:
+        from src.models import CartItem
+
+        result = await self._session.execute(
+            select(CartItem).where(
+                CartItem.id == item_id,
+                self._owner_clause(user_id, session_id),
+            )
+        )
+        item = result.scalar_one_or_none()
+        if item is None:
+            return False
+        await self._session.delete(item)
+        await self._session.commit()
+        return True
+
+    async def clear(
+        self, *, user_id: uuid.UUID | None, session_id: str | None
+    ) -> None:
+        from src.models import CartItem
+
+        await self._session.execute(
+            delete(CartItem).where(self._owner_clause(user_id, session_id))
+        )
+        await self._session.commit()
+
+    async def merge_guest_into_user(
+        self, *, session_id: str, user_id: uuid.UUID
+    ) -> None:
+        from src.models import CartItem
+
+        guest_result = await self._session.execute(
+            select(CartItem).where(CartItem.session_id == session_id)
+        )
+        guest_items = guest_result.scalars().all()
+
+        now = datetime.now(UTC)
+        for guest_item in guest_items:
+            user_result = await self._session.execute(
+                select(CartItem).where(
+                    CartItem.user_id == user_id,
+                    CartItem.sku_id == guest_item.sku_id,
+                )
+            )
+            user_item = user_result.scalar_one_or_none()
+            if user_item is not None:
+                user_item.quantity = max(user_item.quantity, guest_item.quantity)
+                user_item.updated_at = now
+                await self._session.delete(guest_item)
+            else:
+                guest_item.user_id = user_id
+                guest_item.session_id = None
+                guest_item.updated_at = now
+
+        await self._session.commit()
