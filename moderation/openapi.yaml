@@ -1,84 +1,937 @@
 openapi: 3.0.3
 info:
-  title: NeoMarket Moderation
-  version: "1.0"
+  title: NeoMarket Moderation API (единая схема)
   description: |
-    Модуль модерации товаров.
+    Единая Moderation-схема NeoMarket, собранная из лучших практик команд:
+    - Команда A (komanda-Amoderation-10.yaml) — базовая структура, json_before/json_after снапшоты,
+      queue_priority, BlockingReason с hard_block, FieldReports
+    - Дополнения: канонический формат пагинации, единый Error-формат, явные timeouts
 
-    Логика работы:
-    1. Moderation узнаёт что товар создан или изменён (формат события — ???)
-    2. Запрашивает данные товара из B2B (GET /api/v1/products/{id})
-    3. Сохраняет снимок товара. Если товар изменён — два снимка: "до" и "после"
-    4. Модератор берёт карточку из очереди и проверяет
-    5. Одобряет или блокирует — и сообщает B2B (формат события — ???)
+    Ключевые правила флоу:
+    - Очередь модерации имеет 4 приоритета (1 — максимальный, 4 — минимальный)
+    - Статусы тикетов: PENDING → IN_REVIEW → (APPROVED | BLOCKED | HARD_BLOCKED)
+    - Таймаут IN_REVIEW — 30 минут, после чего тикет возвращается в PENDING
+    - Каждый тикет хранит json_before и json_after — снапшоты товара для аудита
+    - Решение модератора порождает событие в B2B через /events callback
+    - Блокирующие причины бывают soft (hard_block=false) и hard (hard_block=true);
+      HARD_BLOCK — терминальный статус товара
+    - Field reports позволяют пометить отдельные поля товара как невалидные с комментариями
+  version: 1.0.0
+  contact:
+    name: NeoMarket Team
+
+servers:
+  - url: https://api.neomarket.example.com
+    description: Production
+  - url: http://localhost:8000
+    description: Local
+
+tags:
+  - name: Auth
+    description: Аутентификация модераторов
+  - name: Moderators
+    description: Управление модераторами (admin)
+  - name: Queue
+    description: Очередь тикетов модерации
+  - name: Tickets
+    description: Работа с конкретным тикетом
+  - name: BlockingReasons
+    description: Справочник причин блокировки
+  - name: Stats
+    description: Статистика модерации
+  - name: B2B Events
+    description: Приём событий о товарах от B2B
+
+security:
+  - bearerAuth: []
 
 paths:
-  /api/v1/product-moderation/get-next:
+  # -------------------- AUTH --------------------
+  /api/v1/auth/login:
     post:
-      summary: Следующая карточка из очереди
-      tags: [Queue]
-      responses:
-        "200":
-          description: Карточка для проверки
-          content:
-            application/json:
-              schema:
-                type: object
-                # Формат ответа — проектируется
-        "204":
-          description: Очередь пуста
-
-  /api/v1/products/{id}/approve:
-    post:
-      summary: Одобрить товар
-      tags: [Decisions]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-      responses:
-        "200":
-          description: Товар одобрен, статус → MODERATED
-        "404":
-          description: Товар не найден в очереди
-
-  /api/v1/products/{id}/decline:
-    post:
-      summary: Заблокировать товар (с причиной)
-      tags: [Decisions]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
+      tags: [Auth]
+      summary: Вход модератора
+      security: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              # Что нужно, чтобы продавец понял что исправить?
-              # Достаточно общей причины — или надо указать конкретные поля?
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, format: password }
       responses:
-        "200":
-          description: Товар заблокирован, статус → BLOCKED
-        "404":
-          description: Товар не найден в очереди
+        '200':
+          description: Успешный вход
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
 
-  /api/v1/product-blocking-reasons:
-    get:
-      summary: Список причин блокировки
-      tags: [Reference]
+  /api/v1/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Обновление access-токена
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
       responses:
-        "200":
+        '200':
+          description: Новая пара токенов
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenResponse' }
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Выход
+      responses:
+        '204': { description: ОК }
+
+  # -------------------- MODERATORS (admin) --------------------
+  /api/v1/moderators:
+    get:
+      tags: [Moderators]
+      summary: Список модераторов
+      description: Доступно только пользователям с ролью ADMIN.
+      parameters:
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/OffsetParam'
+        - name: is_active
+          in: query
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Страница модераторов
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedModerators' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Moderators]
+      summary: Создать модератора
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ModeratorCreateRequest' }
+      responses:
+        '201':
+          description: Создан
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModeratorResponse' }
+        '409':
+          description: Email уже используется
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/moderators/me:
+    get:
+      tags: [Moderators]
+      summary: Профиль текущего модератора
+      responses:
+        '200':
+          description: Профиль
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModeratorResponse' }
+
+  /api/v1/moderators/{moderator_id}:
+    parameters:
+      - $ref: '#/components/parameters/ModeratorId'
+    get:
+      tags: [Moderators]
+      summary: Карточка модератора
+      responses:
+        '200':
+          description: Модератор
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModeratorResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Moderators]
+      summary: Изменить модератора
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ModeratorUpdateRequest' }
+      responses:
+        '200':
+          description: Обновлён
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModeratorResponse' }
+    delete:
+      tags: [Moderators]
+      summary: Деактивировать модератора (soft-delete)
+      responses:
+        '204': { description: ОК }
+
+  # -------------------- QUEUE --------------------
+  /api/v1/queue:
+    get:
+      tags: [Queue]
+      summary: Просмотреть очередь тикетов
+      description: |
+        Возвращает PENDING-тикеты, отсортированные по queue_priority ASC, created_at ASC.
+        Используется для дашборда — для взятия тикета в работу используйте /queue/claim.
+      parameters:
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/OffsetParam'
+        - name: queue_priority
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 4 }
+        - name: category_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: seller_id
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Страница тикетов
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedTickets' }
+
+  /api/v1/queue/claim:
+    post:
+      tags: [Queue]
+      summary: Взять следующий тикет в работу
+      description: |
+        Атомарно выбирает топовый PENDING-тикет (по приоритету и FIFO),
+        переводит его в IN_REVIEW и привязывает к текущему модератору.
+        TTL блокировки — 30 минут; по истечении автоматический возврат в PENDING.
+        Если тикетов нет — возвращает 204.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                queue_priority:
+                  type: integer
+                  minimum: 1
+                  maximum: 4
+                  description: Опциональный фильтр по приоритету
+                category_ids:
+                  type: array
+                  items: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Тикет взят
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TicketResponse' }
+        '204':
+          description: Очередь пуста
+
+  # -------------------- TICKETS --------------------
+  /api/v1/tickets:
+    get:
+      tags: [Tickets]
+      summary: Список тикетов с фильтрами (history-view)
+      parameters:
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/OffsetParam'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING, IN_REVIEW, APPROVED, BLOCKED, HARD_BLOCKED]
+        - name: moderator_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: product_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: seller_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: created_from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: created_to
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Страница тикетов
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedTickets' }
+
+  /api/v1/tickets/{ticket_id}:
+    parameters:
+      - $ref: '#/components/parameters/TicketId'
+    get:
+      tags: [Tickets]
+      summary: Карточка тикета
+      description: |
+        Возвращает полную информацию: json_before и json_after снапшоты,
+        список field_reports, историю решений, текущего модератора.
+      responses:
+        '200':
+          description: Тикет
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TicketDetailResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/tickets/{ticket_id}/release:
+    parameters:
+      - $ref: '#/components/parameters/TicketId'
+    post:
+      tags: [Tickets]
+      summary: Вернуть тикет в очередь (отпустить)
+      description: |
+        Используется если модератор взял тикет, но не успевает обработать.
+        Тикет переходит обратно в PENDING с тем же queue_priority.
+        Доступно только модератору, который держит тикет, или ADMIN.
+      responses:
+        '200':
+          description: Тикет возвращён
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TicketResponse' }
+        '409':
+          description: Тикет уже не в IN_REVIEW или принадлежит другому модератору
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/tickets/{ticket_id}/approve:
+    parameters:
+      - $ref: '#/components/parameters/TicketId'
+    post:
+      tags: [Tickets]
+      summary: Одобрить тикет (MODERATED)
+      description: |
+        После решения сервис порождает событие MODERATED, которое доставляется
+        в B2B на /api/v1/moderation/events.
+        Тикет должен быть в статусе IN_REVIEW и принадлежать вызывающему модератору.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                comment:
+                  type: string
+                  maxLength: 2000
+      responses:
+        '200':
+          description: Тикет одобрен
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TicketResponse' }
+        '409':
+          description: Неверный статус или чужой тикет
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/tickets/{ticket_id}/block:
+    parameters:
+      - $ref: '#/components/parameters/TicketId'
+    post:
+      tags: [Tickets]
+      summary: Заблокировать товар (soft или hard)
+      description: |
+        Тип блокировки определяется по hard_block у выбранной BlockingReason:
+        - hard_block=false → статус товара BLOCKED (продавец может исправить)
+        - hard_block=true  → статус товара HARD_BLOCKED (терминальный)
+        Можно указать несколько причин и field_reports — детальные замечания по полям.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BlockDecisionRequest' }
+      responses:
+        '200':
+          description: Решение принято
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TicketResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409':
+          description: Неверный статус или чужой тикет
+
+  # -------------------- BLOCKING REASONS --------------------
+  /api/v1/blocking-reasons:
+    get:
+      tags: [BlockingReasons]
+      summary: Справочник причин блокировки
+      parameters:
+        - name: hard_block
+          in: query
+          schema: { type: boolean }
+          description: Фильтр по типу
+        - name: is_active
+          in: query
+          schema: { type: boolean, default: true }
+      responses:
+        '200':
           description: Список причин
           content:
             application/json:
               schema:
                 type: array
-                items:
-                  type: object
-                  # Формат — проектируется
+                items: { $ref: '#/components/schemas/BlockingReasonResponse' }
+    post:
+      tags: [BlockingReasons]
+      summary: Создать причину (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BlockingReasonCreateRequest' }
+      responses:
+        '201':
+          description: Создана
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BlockingReasonResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Код уже существует
+
+  /api/v1/blocking-reasons/{reason_id}:
+    parameters:
+      - $ref: '#/components/parameters/ReasonId'
+    patch:
+      tags: [BlockingReasons]
+      summary: Изменить причину (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BlockingReasonUpdateRequest' }
+      responses:
+        '200':
+          description: Обновлена
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BlockingReasonResponse' }
+    delete:
+      tags: [BlockingReasons]
+      summary: Деактивировать причину
+      responses:
+        '204': { description: ОК }
+
+  # -------------------- STATS --------------------
+  /api/v1/stats/overview:
+    get:
+      tags: [Stats]
+      summary: Сводка по очереди и решениям
+      parameters:
+        - name: period
+          in: query
+          schema:
+            type: string
+            enum: [today, week, month]
+            default: today
+      responses:
+        '200':
+          description: Сводка
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatsOverview' }
+
+  /api/v1/stats/moderators:
+    get:
+      tags: [Stats]
+      summary: Производительность модераторов
+      parameters:
+        - name: period
+          in: query
+          schema:
+            type: string
+            enum: [today, week, month]
+            default: week
+      responses:
+        '200':
+          description: Список метрик
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ModeratorStats' }
+
+  # -------------------- B2B EVENTS (входящий канал) --------------------
+  /api/v1/b2b/events:
+    post:
+      tags: [B2B Events]
+      summary: Приём событий о товарах от B2B-сервиса
+      description: |
+        B2B шлёт сюда события о том, что нужно создать тикет:
+        - PRODUCT_CREATED — первый SKU добавлен, нужен тикет на CREATE
+        - PRODUCT_EDITED — товар MODERATED отредактирован, нужен тикет на EDIT
+        - PRODUCT_DELETED — закрыть открытые тикеты по товару
+        Идемпотентность по idempotency_key (TTL 24 часа).
+        Канал защищён X-Service-Key (mTLS/HMAC на инфраструктурном уровне).
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/ServiceKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IncomingB2BEvent' }
+      responses:
+        '202': { description: Принято }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { description: Дубликат события }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    LimitParam:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    OffsetParam:
+      name: offset
+      in: query
+      schema: { type: integer, minimum: 0, default: 0 }
+    TicketId:
+      name: ticket_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ModeratorId:
+      name: moderator_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ReasonId:
+      name: reason_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ServiceKey:
+      name: X-Service-Key
+      in: header
+      required: true
+      schema: { type: string }
+
+  responses:
+    BadRequest:
+      description: Невалидный запрос
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Не авторизован
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Недостаточно прав
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Не найдено
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    # -------- Базовые --------
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, example: TICKET_WRONG_STATUS }
+        message: { type: string }
+        details:
+          type: object
+          additionalProperties: true
+
+    TokenResponse:
+      type: object
+      required: [access_token, refresh_token, expires_in, user_id, token_type]
+      properties:
+        access_token: { type: string }
+        refresh_token: { type: string }
+        token_type: { type: string, default: Bearer }
+        expires_in: { type: integer }
+        user_id: { type: string, format: uuid }
+        role:
+          type: string
+          enum: [MODERATOR, ADMIN]
+
+    # -------- Модераторы --------
+    ModeratorCreateRequest:
+      type: object
+      required: [email, password, first_name, role]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password, minLength: 12 }
+        first_name: { type: string, maxLength: 100 }
+        last_name: { type: string, maxLength: 100 }
+        role:
+          type: string
+          enum: [MODERATOR, ADMIN]
+        category_specializations:
+          type: array
+          items: { type: string, format: uuid }
+          description: Список категорий, на которых модератор специализируется (опционально)
+
+    ModeratorUpdateRequest:
+      type: object
+      properties:
+        first_name: { type: string, maxLength: 100 }
+        last_name: { type: string, maxLength: 100 }
+        role:
+          type: string
+          enum: [MODERATOR, ADMIN]
+        is_active: { type: boolean }
+        category_specializations:
+          type: array
+          items: { type: string, format: uuid }
+
+    ModeratorResponse:
+      type: object
+      required: [id, email, first_name, role, is_active, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        first_name: { type: string }
+        last_name: { type: string, nullable: true }
+        role:
+          type: string
+          enum: [MODERATOR, ADMIN]
+        is_active: { type: boolean }
+        category_specializations:
+          type: array
+          items: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        last_login_at: { type: string, format: date-time, nullable: true }
+
+    PaginatedModerators:
+      type: object
+      required: [items, total_count, limit, offset]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ModeratorResponse' }
+        total_count: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+
+    # -------- Тикеты --------
+    TicketKind:
+      type: string
+      enum: [CREATE, EDIT]
+      description: Тип тикета — на создание товара или на редактирование
+
+    TicketStatus:
+      type: string
+      enum: [PENDING, IN_REVIEW, APPROVED, BLOCKED, HARD_BLOCKED]
+
+    TicketResponse:
+      type: object
+      required:
+        - id
+        - product_id
+        - seller_id
+        - kind
+        - status
+        - queue_priority
+        - created_at
+      properties:
+        id: { type: string, format: uuid }
+        product_id: { type: string, format: uuid }
+        seller_id: { type: string, format: uuid }
+        category_id: { type: string, format: uuid, nullable: true }
+        kind: { $ref: '#/components/schemas/TicketKind' }
+        status: { $ref: '#/components/schemas/TicketStatus' }
+        queue_priority:
+          type: integer
+          minimum: 1
+          maximum: 4
+          description: 1 — самый высокий приоритет
+        assigned_moderator_id:
+          type: string
+          format: uuid
+          nullable: true
+        claimed_at:
+          type: string
+          format: date-time
+          nullable: true
+        claim_expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Когда автоматически вернётся в PENDING (claimed_at + 30 минут)
+        decision_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time, nullable: true }
+
+    TicketDetailResponse:
+      allOf:
+        - $ref: '#/components/schemas/TicketResponse'
+        - type: object
+          required: [json_after]
+          properties:
+            json_before:
+              type: object
+              nullable: true
+              additionalProperties: true
+              description: |
+                Снапшот товара ДО изменений (для kind=EDIT).
+                Для kind=CREATE равен null.
+            json_after:
+              type: object
+              additionalProperties: true
+              description: Снапшот товара на момент создания тикета
+            diff:
+              type: array
+              description: |
+                Опциональный готовый диф для UI (поле, old_value, new_value).
+                Сервер может его вычислять для удобства модератора.
+              items:
+                type: object
+                properties:
+                  field: { type: string }
+                  old_value: {}
+                  new_value: {}
+            field_reports:
+              type: array
+              items: { $ref: '#/components/schemas/FieldReport' }
+            blocking_reasons:
+              type: array
+              items: { $ref: '#/components/schemas/BlockingReasonResponse' }
+            decision_comment:
+              type: string
+              nullable: true
+            history:
+              type: array
+              items: { $ref: '#/components/schemas/TicketHistoryEntry' }
+
+    TicketHistoryEntry:
+      type: object
+      required: [at, action]
+      properties:
+        at: { type: string, format: date-time }
+        action:
+          type: string
+          enum:
+            - CREATED
+            - CLAIMED
+            - RELEASED
+            - APPROVED
+            - BLOCKED
+            - HARD_BLOCKED
+            - AUTO_RETURNED
+        moderator_id: { type: string, format: uuid, nullable: true }
+        comment: { type: string, nullable: true }
+
+    FieldReport:
+      type: object
+      required: [field_path, message]
+      properties:
+        field_path:
+          type: string
+          example: images[0].url
+          description: JSONPath-подобный путь к проблемному полю
+        message:
+          type: string
+          maxLength: 1000
+        severity:
+          type: string
+          enum: [INFO, WARNING, ERROR]
+          default: ERROR
+
+    BlockDecisionRequest:
+      type: object
+      required: [blocking_reason_ids]
+      properties:
+        blocking_reason_ids:
+          type: array
+          minItems: 1
+          items: { type: string, format: uuid }
+        comment:
+          type: string
+          maxLength: 2000
+        field_reports:
+          type: array
+          items: { $ref: '#/components/schemas/FieldReport' }
+
+    PaginatedTickets:
+      type: object
+      required: [items, total_count, limit, offset]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/TicketResponse' }
+        total_count: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+
+    # -------- Причины блокировки --------
+    BlockingReasonCreateRequest:
+      type: object
+      required: [code, title, hard_block]
+      properties:
+        code:
+          type: string
+          pattern: '^[A-Z_]+$'
+          maxLength: 64
+          example: FORBIDDEN_GOODS
+        title:
+          type: string
+          maxLength: 200
+        description:
+          type: string
+          maxLength: 2000
+        hard_block:
+          type: boolean
+          description: |
+            true → товар уходит в HARD_BLOCKED (терминальный статус, продавец не может исправить).
+            false → BLOCKED, продавец может отредактировать и пройти модерацию заново.
+
+    BlockingReasonUpdateRequest:
+      type: object
+      properties:
+        title: { type: string, maxLength: 200 }
+        description: { type: string, maxLength: 2000 }
+        is_active: { type: boolean }
+
+    BlockingReasonResponse:
+      type: object
+      required: [id, code, title, hard_block, is_active]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        title: { type: string }
+        description: { type: string, nullable: true }
+        hard_block: { type: boolean }
+        is_active: { type: boolean }
+
+    # -------- Статистика --------
+    StatsOverview:
+      type: object
+      required:
+        - pending_count
+        - in_review_count
+        - approved_count
+        - blocked_count
+        - hard_blocked_count
+      properties:
+        pending_count: { type: integer }
+        in_review_count: { type: integer }
+        approved_count: { type: integer, description: За выбранный период }
+        blocked_count: { type: integer }
+        hard_blocked_count: { type: integer }
+        avg_review_time_seconds:
+          type: integer
+          description: Среднее время от CLAIMED до решения
+        pending_by_priority:
+          type: object
+          properties:
+            "1": { type: integer }
+            "2": { type: integer }
+            "3": { type: integer }
+            "4": { type: integer }
+
+    ModeratorStats:
+      type: object
+      required: [moderator_id, decisions_count]
+      properties:
+        moderator_id: { type: string, format: uuid }
+        moderator_name: { type: string }
+        decisions_count: { type: integer }
+        approved_count: { type: integer }
+        blocked_count: { type: integer }
+        hard_blocked_count: { type: integer }
+        avg_review_time_seconds: { type: integer }
+        released_count:
+          type: integer
+          description: Сколько раз тикеты возвращались в очередь без решения
+
+    # -------- Входящие события от B2B --------
+    IncomingB2BEvent:
+      type: object
+      required: [event_type, idempotency_key, occurred_at, payload]
+      properties:
+        event_type:
+          type: string
+          enum:
+            - PRODUCT_CREATED
+            - PRODUCT_EDITED
+            - PRODUCT_DELETED
+        idempotency_key: { type: string, format: uuid }
+        occurred_at: { type: string, format: date-time }
+        payload:
+          oneOf:
+            - $ref: '#/components/schemas/EventProductCreated'
+            - $ref: '#/components/schemas/EventProductEdited'
+            - $ref: '#/components/schemas/EventProductDeleted'
+
+    EventProductCreated:
+      type: object
+      required: [product_id, seller_id, json_after]
+      properties:
+        product_id: { type: string, format: uuid }
+        seller_id: { type: string, format: uuid }
+        category_id: { type: string, format: uuid, nullable: true }
+        queue_priority:
+          type: integer
+          minimum: 1
+          maximum: 4
+          default: 3
+        json_after:
+          type: object
+          additionalProperties: true
+
+    EventProductEdited:
+      type: object
+      required: [product_id, seller_id, json_before, json_after]
+      properties:
+        product_id: { type: string, format: uuid }
+        seller_id: { type: string, format: uuid }
+        category_id: { type: string, format: uuid, nullable: true }
+        queue_priority:
+          type: integer
+          minimum: 1
+          maximum: 4
+          default: 3
+        json_before:
+          type: object
+          additionalProperties: true
+        json_after:
+          type: object
+          additionalProperties: true
+
+    EventProductDeleted:
+      type: object
+      required: [product_id]
+      properties:
+        product_id: { type: string, format: uuid }

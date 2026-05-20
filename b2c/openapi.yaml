@@ -1,0 +1,1413 @@
+openapi: 3.0.3
+info:
+  title: NeoMarket B2C API (единая схема)
+  description: |
+    Единая B2C-схема NeoMarket, собранная из лучших практик команд:
+    - Команда A (komanda-A-b2c-9.yaml) — базовая структура, статусы, избранное, адреса
+    - Команда Без Диких Ягод (cart/catalog/orders endpoints) — deepObject-фильтры,
+      POST /cart/validate, подписки на товары, баннеры/коллекции
+    - Команда fukhen-dukhen — пагинация {items, total_count, limit, offset}, CategoryRef
+
+    Ключевые правила:
+    - Все ID — UUID (string, format: uuid)
+    - Все денежные значения — в копейках (integer)
+    - Гость работает по заголовку X-Session-Id; при логине корзина мержится (max quantity)
+    - Заказы создаются с обязательным idempotency_key (TTL 1 час)
+    - Каталог проксируется из B2B по сервисному ключу X-Service-Key
+    - События из B2B (PRODUCT_BLOCKED, SKU_OUT_OF_STOCK и т.п.) принимаются на /api/v1/b2b/events
+  version: 1.0.0
+  contact:
+    name: NeoMarket Team
+
+servers:
+  - url: https://api.neomarket.example.com
+    description: Production
+  - url: http://localhost:8000
+    description: Local
+
+tags:
+  - name: Auth
+    description: Регистрация и аутентификация покупателей
+  - name: Buyer
+    description: Профиль покупателя
+  - name: Addresses
+    description: Адреса доставки
+  - name: PaymentMethods
+    description: Платёжные методы (моки)
+  - name: Catalog
+    description: Каталог товаров (проксируется из B2B)
+  - name: Cart
+    description: Корзина (гость + авторизованный)
+  - name: Favorites
+    description: Избранное и подписки на товары
+  - name: Orders
+    description: Заказы покупателя
+  - name: Notifications
+    description: Уведомления и подписки
+  - name: B2B Events
+    description: Приём событий от B2B-сервиса (служебный канал)
+
+security:
+  - bearerAuth: []
+
+paths:
+  # -------------------- AUTH --------------------
+  /api/v1/auth/register:
+    post:
+      tags: [Auth]
+      summary: Регистрация покупателя
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BuyerRegisterRequest"
+      responses:
+        "201":
+          description: Покупатель создан, возвращены токены
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409":
+          description: Email уже зарегистрирован
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Вход покупателя
+      description: |
+        Если в заголовке X-Session-Id передана гостевая корзина,
+        она сольётся с пользовательской по правилу max(quantity).
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/SessionIdOptional"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Успешный вход
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Обновление access-токена
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        "200":
+          description: Новая пара токенов
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Выход (отзыв refresh-токена)
+      responses:
+        "204": { description: Успех }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # -------------------- BUYER --------------------
+  /api/v1/buyers/me:
+    get:
+      tags: [Buyer]
+      summary: Профиль текущего покупателя
+      description: ID берётся из JWT, не из тела/пути (защита от IDOR).
+      responses:
+        "200":
+          description: Профиль покупателя
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BuyerResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    patch:
+      tags: [Buyer]
+      summary: Частичное обновление профиля
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BuyerUpdateRequest" }
+      responses:
+        "200":
+          description: Обновлённый профиль
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BuyerResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    delete:
+      tags: [Buyer]
+      summary: Soft-delete аккаунта
+      responses:
+        "204": { description: Удалён }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # -------------------- ADDRESSES --------------------
+  /api/v1/buyers/me/addresses:
+    get:
+      tags: [Addresses]
+      summary: Список адресов покупателя
+      responses:
+        "200":
+          description: Адреса
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AddressResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Addresses]
+      summary: Добавить адрес
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AddressCreateRequest" }
+      responses:
+        "201":
+          description: Создан
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AddressResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/v1/buyers/me/addresses/{address_id}:
+    parameters:
+      - $ref: "#/components/parameters/AddressId"
+    patch:
+      tags: [Addresses]
+      summary: Изменить адрес
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AddressUpdateRequest" }
+      responses:
+        "200":
+          description: Обновлён
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AddressResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Addresses]
+      summary: Удалить адрес
+      responses:
+        "204": { description: Удалён }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # -------------------- PAYMENT METHODS (mock) --------------------
+  /api/v1/buyers/me/payment-methods:
+    get:
+      tags: [PaymentMethods]
+      summary: Платёжные методы покупателя
+      responses:
+        "200":
+          description: Список
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/PaymentMethodResponse" }
+    post:
+      tags: [PaymentMethods]
+      summary: Добавить платёжный метод (мок)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PaymentMethodCreateRequest" }
+      responses:
+        "201":
+          description: Создан
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaymentMethodResponse" }
+
+  /api/v1/buyers/me/payment-methods/{method_id}:
+    parameters:
+      - $ref: "#/components/parameters/PaymentMethodId"
+    delete:
+      tags: [PaymentMethods]
+      summary: Удалить платёжный метод
+      responses:
+        "204": { description: Удалён }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # -------------------- CATALOG (proxy из B2B) --------------------
+  /api/v1/catalog/categories:
+    get:
+      tags: [Catalog]
+      summary: Список категорий (плоский)
+      security: []
+      responses:
+        "200":
+          description: Категории
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/CategoryRef" }
+
+  /api/v1/catalog/categories/tree:
+    get:
+      tags: [Catalog]
+      summary: Дерево категорий
+      security: []
+      responses:
+        "200":
+          description: Дерево
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/CategoryTreeNode" }
+
+  /api/v1/catalog/products:
+    get:
+      tags: [Catalog]
+      summary: Публичный листинг товаров с фильтрами
+      description: |
+        Прокси к B2B public-каталогу (через X-Service-Key внутри).
+        Возвращаются только MODERATED товары с in_stock>0 хотя бы по одному SKU.
+        Фильтры передаются в deepObject-стиле:
+        `?filter[price_min]=10000&filter[price_max]=50000&filter[category_id]=...`
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/LimitParam"
+        - $ref: "#/components/parameters/OffsetParam"
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 200 }
+          description: Полнотекстовый поиск
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [price_asc, price_desc, popularity, new]
+            default: popularity
+        - name: filter
+          in: query
+          style: deepObject
+          explode: true
+          schema:
+            $ref: "#/components/schemas/CatalogFilter"
+      responses:
+        "200":
+          description: Страница товаров
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaginatedCatalogProducts" }
+
+  /api/v1/catalog/products/{product_id}:
+    parameters:
+      - $ref: "#/components/parameters/ProductId"
+    get:
+      tags: [Catalog]
+      summary: Карточка товара (публичная)
+      security: []
+      responses:
+        "200":
+          description: Товар
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CatalogProductDetail" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/catalog/products/{product_id}/similar:
+    parameters:
+      - $ref: "#/components/parameters/ProductId"
+    get:
+      tags: [Catalog]
+      summary: Похожие товары
+      security: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50, default: 10 }
+      responses:
+        "200":
+          description: Список
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/CatalogProductCard" }
+
+  /api/v1/catalog/banners:
+    get:
+      tags: [Catalog]
+      summary: Активные баннеры главной
+      security: []
+      responses:
+        "200":
+          description: Баннеры
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Banner" }
+
+  /api/v1/catalog/collections:
+    get:
+      tags: [Catalog]
+      summary: Подборки товаров (например "Хиты недели")
+      security: []
+      responses:
+        "200":
+          description: Подборки
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Collection" }
+
+  # -------------------- CART --------------------
+  /api/v1/cart:
+    get:
+      tags: [Cart]
+      summary: Получить корзину
+      description: |
+        Корзина определяется так:
+        - если есть Authorization — берётся пользовательская корзина
+        - иначе по заголовку X-Session-Id (создаётся при первом обращении)
+        Цены и остатки запрашиваются у B2B по batch-эндпоинту в момент чтения.
+      security:
+        - bearerAuth: []
+        - {}
+      parameters:
+        - $ref: "#/components/parameters/SessionIdOptional"
+      responses:
+        "200":
+          description: Состояние корзины
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CartResponse" }
+
+    delete:
+      tags: [Cart]
+      summary: Очистить корзину
+      security:
+        - bearerAuth: []
+        - {}
+      parameters:
+        - $ref: "#/components/parameters/SessionIdOptional"
+      responses:
+        "204": { description: Очищена }
+
+  /api/v1/cart/items:
+    post:
+      tags: [Cart]
+      summary: Добавить SKU в корзину
+      security:
+        - bearerAuth: []
+        - {}
+      parameters:
+        - $ref: "#/components/parameters/SessionIdOptional"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CartItemAddRequest" }
+      responses:
+        "200":
+          description: Обновлённая корзина
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CartResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404":
+          description: SKU не найден или товар недоступен
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Недостаточно остатков
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/cart/items/{sku_id}:
+    parameters:
+      - $ref: "#/components/parameters/SkuId"
+      - $ref: "#/components/parameters/SessionIdOptional"
+    patch:
+      tags: [Cart]
+      summary: Изменить количество SKU в корзине
+      security:
+        - bearerAuth: []
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [quantity]
+              properties:
+                quantity:
+                  type: integer
+                  minimum: 1
+                  description: Если требуется удалить — используйте DELETE
+      responses:
+        "200":
+          description: Обновлённая корзина
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CartResponse" }
+        "409":
+          description: Недостаточно остатков
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    delete:
+      tags: [Cart]
+      summary: Удалить SKU из корзины
+      security:
+        - bearerAuth: []
+        - {}
+      responses:
+        "200":
+          description: Обновлённая корзина
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CartResponse" }
+
+  /api/v1/cart/validate:
+    post:
+      tags: [Cart]
+      summary: Валидировать корзину перед чекаутом
+      description: |
+        Проверяет актуальность цен и остатков, доступность товаров (не BLOCKED).
+        Возвращает список проблем — клиент должен показать их пользователю
+        и обновить корзину до создания заказа.
+      security:
+        - bearerAuth: []
+        - {}
+      parameters:
+        - $ref: "#/components/parameters/SessionIdOptional"
+      responses:
+        "200":
+          description: Результат валидации
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CartValidationResponse" }
+
+  /api/v1/cart/merge:
+    post:
+      tags: [Cart]
+      summary: Явное слияние гостевой корзины с пользовательской
+      description: |
+        Обычно мерж выполняется автоматически при /auth/login,
+        но эндпоинт оставлен для случаев, когда клиент авторизуется отдельно.
+        Правило слияния: для каждой пары (sku_id) берётся max(quantity).
+      parameters:
+        - $ref: "#/components/parameters/SessionIdRequired"
+      responses:
+        "200":
+          description: Слитая корзина
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CartResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # -------------------- FAVORITES --------------------
+  /api/v1/favorites:
+    get:
+      tags: [Favorites]
+      summary: Избранные товары
+      parameters:
+        - $ref: "#/components/parameters/LimitParam"
+        - $ref: "#/components/parameters/OffsetParam"
+      responses:
+        "200":
+          description: Список
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaginatedCatalogProducts" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/favorites/{product_id}:
+    parameters:
+      - $ref: "#/components/parameters/ProductId"
+    put:
+      tags: [Favorites]
+      summary: Добавить товар в избранное (идемпотентно)
+      responses:
+        "204": { description: Добавлен }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Favorites]
+      summary: Удалить из избранного
+      responses:
+        "204": { description: Удалён }
+
+  /api/v1/favorites/{product_id}/subscribe:
+    parameters:
+      - $ref: "#/components/parameters/ProductId"
+    post:
+      tags: [Favorites]
+      summary: Подписаться на уведомления о товаре
+      description: |
+        События: появление в наличии, изменение цены.
+        Реализация — push/email-уведомления через notification-сервис.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                events:
+                  type: array
+                  items:
+                    type: string
+                    enum: [BACK_IN_STOCK, PRICE_DROP]
+                  default: [BACK_IN_STOCK, PRICE_DROP]
+      responses:
+        "204": { description: Подписан }
+    delete:
+      tags: [Favorites]
+      summary: Отписаться
+      responses:
+        "204": { description: Отписан }
+
+  # -------------------- ORDERS --------------------
+  /api/v1/orders:
+    get:
+      tags: [Orders]
+      summary: История заказов покупателя
+      parameters:
+        - $ref: "#/components/parameters/LimitParam"
+        - $ref: "#/components/parameters/OffsetParam"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum:
+              [
+                CREATED,
+                PAID,
+                ASSEMBLING,
+                DELIVERING,
+                DELIVERED,
+                CANCELLED,
+                CANCEL_PENDING,
+              ]
+      responses:
+        "200":
+          description: Страница заказов
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaginatedOrders" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+    post:
+      tags: [Orders]
+      summary: Создать заказ (чекаут)
+      description: |
+        Алгоритм:
+        1. Валидация корзины и адреса.
+        2. Резерв SKU в B2B (с тем же idempotency_key).
+        3. Мок-оплата → статус сразу PAID.
+        4. Цены в OrderItem фиксируются на момент создания.
+
+        Заголовок Idempotency-Key обязателен. TTL ключа — 1 час.
+        Повторный запрос с тем же ключом и тем же телом вернёт уже созданный заказ.
+        При несовпадении тела — 409.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OrderCreateRequest" }
+      responses:
+        "201":
+          description: Заказ создан
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrderResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409":
+          description: |
+            Конфликт: либо несовпадение тела с уже использованным idempotency_key,
+            либо не удалось зарезервировать остатки.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: Корзина невалидна (см. /cart/validate)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CartValidationResponse" }
+
+  /api/v1/orders/{order_id}:
+    parameters:
+      - $ref: "#/components/parameters/OrderId"
+    get:
+      tags: [Orders]
+      summary: Карточка заказа
+      responses:
+        "200":
+          description: Заказ
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrderResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/orders/{order_id}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/OrderId"
+    post:
+      tags: [Orders]
+      summary: Отменить заказ
+      description: |
+        Отмена разрешена только в статусах CREATED/PAID/ASSEMBLING.
+        Алгоритм:
+        1. Перевод заказа в CANCEL_PENDING.
+        2. Вызов unreserve в B2B (идемпотентно по order_id).
+        3. При успехе → CANCELLED, при ошибке → остаётся CANCEL_PENDING,
+           воркер ретраит с экспоненциальным backoff.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  maxLength: 500
+      responses:
+        "200":
+          description: Заказ перешёл в CANCELLED или CANCEL_PENDING
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrderResponse" }
+        "409":
+          description: Статус не допускает отмену
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  # -------------------- NOTIFICATIONS --------------------
+  /api/v1/notifications:
+    get:
+      tags: [Notifications]
+      summary: Лента уведомлений
+      parameters:
+        - $ref: "#/components/parameters/LimitParam"
+        - $ref: "#/components/parameters/OffsetParam"
+        - name: unread_only
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Уведомления
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaginatedNotifications" }
+
+  /api/v1/notifications/{notification_id}/read:
+    parameters:
+      - name: notification_id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [Notifications]
+      summary: Отметить уведомление как прочитанное
+      responses:
+        "204": { description: ОК }
+
+  # -------------------- B2B EVENTS (служебный канал) --------------------
+  /api/v1/b2b/events:
+    post:
+      tags: [B2B Events]
+      summary: Приём событий от B2B-сервиса
+      description: |
+        Канал требует X-Service-Key (mTLS/HMAC-подпись на уровне инфраструктуры).
+        Поддерживаемые типы:
+        - PRODUCT_BLOCKED / PRODUCT_HARD_BLOCKED — пометить товар недоступным, удалить из корзин
+        - PRODUCT_DELETED — окончательное удаление
+        - SKU_OUT_OF_STOCK — снять SKU с витрины
+        - PRICE_CHANGED — обновить кеш каталога, триггер PRICE_DROP-уведомлений
+        - BACK_IN_STOCK — триггер уведомлений подписчикам
+        Идемпотентность по polю idempotency_key (TTL 24 часа).
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/ServiceKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/B2BEvent" }
+      responses:
+        "202": { description: Принято в обработку }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409":
+          description: Дубликат события (idempotency_key уже использован)
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    LimitParam:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    OffsetParam:
+      name: offset
+      in: query
+      schema: { type: integer, minimum: 0, default: 0 }
+    SessionIdOptional:
+      name: X-Session-Id
+      in: header
+      required: false
+      schema: { type: string, format: uuid }
+      description: |
+        Обязателен для гостевых корзин. Если есть Authorization — игнорируется
+        (кроме /auth/login и /cart/merge, где используется для слияния).
+    SessionIdRequired:
+      name: X-Session-Id
+      in: header
+      required: true
+      schema: { type: string, format: uuid }
+    ServiceKey:
+      name: X-Service-Key
+      in: header
+      required: true
+      schema: { type: string }
+      description: Внутренний сервисный ключ для server-to-server вызовов
+    ProductId:
+      name: product_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    SkuId:
+      name: sku_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    OrderId:
+      name: order_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    AddressId:
+      name: address_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    PaymentMethodId:
+      name: method_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  responses:
+    BadRequest:
+      description: Невалидный запрос
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Не авторизован
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: Нет прав
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Не найдено
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    # -------- Базовые --------
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          example: VALIDATION_ERROR
+        message:
+          type: string
+          example: Поле email обязательно
+        details:
+          type: object
+          additionalProperties: true
+
+    TokenResponse:
+      type: object
+      required: [access_token, refresh_token, expires_in, user_id, token_type]
+      properties:
+        access_token: { type: string }
+        refresh_token: { type: string }
+        token_type: { type: string, default: Bearer }
+        expires_in:
+          { type: integer, description: "TTL access-токена в секундах" }
+        user_id: { type: string, format: uuid }
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password, minLength: 8 }
+
+    # -------- Buyer --------
+    BuyerRegisterRequest:
+      type: object
+      required: [email, password, first_name]
+      properties:
+        email: { type: string, format: email }
+        password:
+          { type: string, format: password, minLength: 8, maxLength: 128 }
+        first_name: { type: string, minLength: 1, maxLength: 100 }
+        last_name: { type: string, maxLength: 100 }
+        phone:
+          type: string
+          pattern: '^\+?[0-9]{10,15}$'
+
+    BuyerUpdateRequest:
+      type: object
+      properties:
+        first_name: { type: string, maxLength: 100 }
+        last_name: { type: string, maxLength: 100 }
+        phone: { type: string, pattern: '^\+?[0-9]{10,15}$' }
+        date_of_birth: { type: string, format: date }
+
+    BuyerResponse:
+      type: object
+      required: [id, email, first_name, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        first_name: { type: string }
+        last_name: { type: string, nullable: true }
+        phone: { type: string, nullable: true }
+        date_of_birth: { type: string, format: date, nullable: true }
+        is_active: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time, nullable: true }
+
+    # -------- Адреса --------
+    AddressCreateRequest:
+      type: object
+      required: [country, city, street, building]
+      properties:
+        country: { type: string, maxLength: 100 }
+        region: { type: string, maxLength: 200 }
+        city: { type: string, maxLength: 200 }
+        street: { type: string, maxLength: 200 }
+        building: { type: string, maxLength: 50 }
+        apartment: { type: string, maxLength: 50 }
+        postal_code: { type: string, maxLength: 20 }
+        recipient_name: { type: string, maxLength: 200 }
+        recipient_phone: { type: string, pattern: '^\+?[0-9]{10,15}$' }
+        is_default: { type: boolean, default: false }
+        comment: { type: string, maxLength: 500 }
+
+    AddressUpdateRequest:
+      allOf:
+        - $ref: "#/components/schemas/AddressCreateRequest"
+
+    AddressResponse:
+      allOf:
+        - $ref: "#/components/schemas/AddressCreateRequest"
+        - type: object
+          required: [id, created_at]
+          properties:
+            id: { type: string, format: uuid }
+            created_at: { type: string, format: date-time }
+
+    # -------- Платёжные методы (мок) --------
+    PaymentMethodCreateRequest:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [CARD, SBP, WALLET]
+        card_last4:
+          type: string
+          pattern: "^[0-9]{4}$"
+          description: Только для type=CARD
+        card_brand:
+          type: string
+          enum: [VISA, MASTERCARD, MIR]
+        is_default: { type: boolean, default: false }
+
+    PaymentMethodResponse:
+      allOf:
+        - $ref: "#/components/schemas/PaymentMethodCreateRequest"
+        - type: object
+          required: [id, created_at]
+          properties:
+            id: { type: string, format: uuid }
+            created_at: { type: string, format: date-time }
+
+    # -------- Категории --------
+    CategoryRef:
+      type: object
+      required: [id, name, level, path]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        parent_id: { type: string, format: uuid, nullable: true }
+        level: { type: integer, minimum: 0 }
+        path:
+          type: array
+          items: { type: string }
+          description: Хлебные крошки от корня к текущей
+
+    CategoryTreeNode:
+      allOf:
+        - $ref: "#/components/schemas/CategoryRef"
+        - type: object
+          properties:
+            children:
+              type: array
+              items: { $ref: "#/components/schemas/CategoryTreeNode" }
+
+    # -------- Каталог --------
+    CatalogFilter:
+      type: object
+      properties:
+        category_id: { type: string, format: uuid }
+        price_min:
+          {
+            type: integer,
+            minimum: 0,
+            description: Минимальная цена в копейках,
+          }
+        price_max: { type: integer, minimum: 0 }
+        seller_id: { type: string, format: uuid }
+        attributes:
+          type: object
+          additionalProperties:
+            oneOf:
+              - { type: string }
+              - { type: array, items: { type: string } }
+          description: Динамические атрибуты, например color=red, size=M
+
+    CatalogProductCard:
+      type: object
+      required: [id, name, min_price, has_stock, images]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        slug: { type: string }
+        category: { $ref: "#/components/schemas/CategoryRef" }
+        min_price:
+          type: integer
+          description: Минимальная цена среди доступных SKU, копейки
+        old_price:
+          type: integer
+          nullable: true
+          description: Старая цена (для зачёркивания), копейки
+        has_stock: { type: boolean }
+        rating:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 5
+          nullable: true
+        reviews_count: { type: integer, minimum: 0 }
+        images:
+          type: array
+          items: { $ref: "#/components/schemas/ImageRef" }
+        seller:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            display_name: { type: string }
+
+    CatalogProductDetail:
+      allOf:
+        - $ref: "#/components/schemas/CatalogProductCard"
+        - type: object
+          required: [description, skus]
+          properties:
+            description: { type: string }
+            attributes:
+              type: object
+              additionalProperties: true
+            skus:
+              type: array
+              items: { $ref: "#/components/schemas/CatalogSku" }
+
+    CatalogSku:
+      type: object
+      required: [id, price, available_quantity]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        sku_code: { type: string }
+        price: { type: integer, description: Цена в копейках }
+        old_price: { type: integer, nullable: true }
+        available_quantity:
+          type: integer
+          minimum: 0
+          description: Остаток за вычетом резерва
+        attributes:
+          type: object
+          additionalProperties: true
+        images:
+          type: array
+          items: { $ref: "#/components/schemas/ImageRef" }
+
+    ImageRef:
+      type: object
+      required: [id, url, ordering]
+      properties:
+        id: { type: string, format: uuid }
+        url: { type: string, format: uri }
+        alt: { type: string }
+        ordering: { type: integer, minimum: 0 }
+        is_main: { type: boolean }
+
+    PaginatedCatalogProducts:
+      type: object
+      required: [items, total_count, limit, offset]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/CatalogProductCard" }
+        total_count: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+
+    Banner:
+      type: object
+      required: [id, image_url, link]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        image_url: { type: string, format: uri }
+        link: { type: string, format: uri }
+        ordering: { type: integer }
+        active_from: { type: string, format: date-time }
+        active_to: { type: string, format: date-time }
+
+    Collection:
+      type: object
+      required: [id, name, products]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        products:
+          type: array
+          items: { $ref: "#/components/schemas/CatalogProductCard" }
+
+    # -------- Корзина --------
+    CartItemAddRequest:
+      type: object
+      required: [sku_id, quantity]
+      properties:
+        sku_id: { type: string, format: uuid }
+        quantity: { type: integer, minimum: 1 }
+
+    CartItem:
+      type: object
+      required:
+        [
+          sku_id,
+          product_id,
+          name,
+          quantity,
+          unit_price,
+          line_total,
+          available_quantity,
+          is_available,
+        ]
+      properties:
+        sku_id: { type: string, format: uuid }
+        product_id: { type: string, format: uuid }
+        name: { type: string, description: Название "товар + SKU" }
+        sku_code: { type: string }
+        quantity: { type: integer, minimum: 1 }
+        unit_price:
+          type: integer
+          description: Актуальная цена за единицу, копейки
+        unit_price_at_add:
+          type: integer
+          nullable: true
+          description: Цена на момент добавления (для подсветки изменений)
+        line_total: { type: integer, description: unit_price * quantity }
+        available_quantity:
+          type: integer
+          minimum: 0
+        is_available:
+          type: boolean
+          description: false если товар BLOCKED/удалён/нет остатка
+        image:
+          $ref: "#/components/schemas/ImageRef"
+
+    CartResponse:
+      type: object
+      required: [items, items_count, subtotal, is_valid]
+      properties:
+        id: { type: string, format: uuid, description: ID корзины (или сессии) }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/CartItem" }
+        items_count:
+          type: integer
+          description: Сумма quantity по всем строкам
+        subtotal:
+          type: integer
+          description: Сумма line_total, копейки
+        is_valid:
+          type: boolean
+          description: true если все позиции is_available и количество не превышает остаток
+        updated_at: { type: string, format: date-time }
+
+    CartValidationIssue:
+      type: object
+      required: [sku_id, type, message]
+      properties:
+        sku_id: { type: string, format: uuid }
+        type:
+          type: string
+          enum:
+            - PRICE_CHANGED
+            - OUT_OF_STOCK
+            - QUANTITY_REDUCED
+            - PRODUCT_BLOCKED
+            - PRODUCT_DELETED
+        message: { type: string }
+        old_value:
+          oneOf: [{ type: string }, { type: integer }]
+        new_value:
+          oneOf: [{ type: string }, { type: integer }]
+
+    CartValidationResponse:
+      type: object
+      required: [is_valid, cart, issues]
+      properties:
+        is_valid: { type: boolean }
+        cart: { $ref: "#/components/schemas/CartResponse" }
+        issues:
+          type: array
+          items: { $ref: "#/components/schemas/CartValidationIssue" }
+
+    # -------- Заказы --------
+    OrderCreateRequest:
+      type: object
+      required: [address_id, payment_method_id]
+      properties:
+        address_id: { type: string, format: uuid }
+        payment_method_id: { type: string, format: uuid }
+        comment:
+          type: string
+          maxLength: 1000
+        items_snapshot:
+          type: array
+          description: |
+            Опционально: явный снапшот корзины {sku_id, quantity, unit_price}
+            для защиты от гонок. Если передан — сервер проверит соответствие
+            текущей корзине и при расхождении вернёт 422.
+          items:
+            type: object
+            required: [sku_id, quantity, unit_price]
+            properties:
+              sku_id: { type: string, format: uuid }
+              quantity: { type: integer, minimum: 1 }
+              unit_price: { type: integer, minimum: 0 }
+
+    OrderItem:
+      type: object
+      required: [sku_id, product_id, name, quantity, unit_price, line_total]
+      properties:
+        sku_id: { type: string, format: uuid }
+        product_id: { type: string, format: uuid }
+        name: { type: string }
+        sku_code: { type: string }
+        quantity: { type: integer, minimum: 1 }
+        unit_price:
+          type: integer
+          description: Цена за единицу, зафиксированная при создании заказа
+        line_total: { type: integer }
+        image_url: { type: string, format: uri, nullable: true }
+
+    OrderResponse:
+      type: object
+      required:
+        [id, buyer_id, status, items, subtotal, total, address, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        number:
+          type: string
+          description: Человекочитаемый номер заказа, например NM-2026-000123
+        buyer_id: { type: string, format: uuid }
+        status:
+          type: string
+          enum:
+            [
+              CREATED,
+              PAID,
+              ASSEMBLING,
+              DELIVERING,
+              DELIVERED,
+              CANCELLED,
+              CANCEL_PENDING,
+            ]
+        status_history:
+          type: array
+          items:
+            type: object
+            properties:
+              status: { type: string }
+              changed_at: { type: string, format: date-time }
+              reason: { type: string, nullable: true }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/OrderItem" }
+        subtotal: { type: integer, description: "Сумма по позициям, копейки" }
+        delivery_cost: { type: integer, default: 0 }
+        total: { type: integer, description: subtotal + delivery_cost }
+        address: { $ref: "#/components/schemas/AddressResponse" }
+        payment_method: { $ref: "#/components/schemas/PaymentMethodResponse" }
+        comment: { type: string, nullable: true }
+        cancel_reason: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        paid_at: { type: string, format: date-time, nullable: true }
+        delivered_at: { type: string, format: date-time, nullable: true }
+
+    PaginatedOrders:
+      type: object
+      required: [items, total_count, limit, offset]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/OrderResponse" }
+        total_count: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+
+    # -------- Уведомления --------
+    Notification:
+      type: object
+      required: [id, type, title, created_at, is_read]
+      properties:
+        id: { type: string, format: uuid }
+        type:
+          type: string
+          enum:
+            - ORDER_STATUS_CHANGED
+            - BACK_IN_STOCK
+            - PRICE_DROP
+            - PROMO
+            - SYSTEM
+        title: { type: string }
+        body: { type: string }
+        payload:
+          type: object
+          additionalProperties: true
+          description: Контекст события (order_id, product_id и т.д.)
+        is_read: { type: boolean }
+        created_at: { type: string, format: date-time }
+
+    PaginatedNotifications:
+      type: object
+      required: [items, total_count, unread_count, limit, offset]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Notification" }
+        total_count: { type: integer }
+        unread_count: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+
+    # -------- События от B2B --------
+    B2BEvent:
+      type: object
+      required: [event_type, idempotency_key, occurred_at, payload]
+      properties:
+        event_type:
+          type: string
+          enum:
+            - PRODUCT_BLOCKED
+            - PRODUCT_HARD_BLOCKED
+            - PRODUCT_DELETED
+            - SKU_OUT_OF_STOCK
+            - SKU_BACK_IN_STOCK
+            - PRICE_CHANGED
+        idempotency_key: { type: string, format: uuid }
+        occurred_at: { type: string, format: date-time }
+        payload:
+          oneOf:
+            - $ref: "#/components/schemas/EventProductRef"
+            - $ref: "#/components/schemas/EventSkuStock"
+            - $ref: "#/components/schemas/EventPriceChanged"
+
+    EventProductRef:
+      type: object
+      required: [product_id]
+      properties:
+        product_id: { type: string, format: uuid }
+        reason: { type: string, nullable: true }
+
+    EventSkuStock:
+      type: object
+      required: [sku_id, product_id, available_quantity]
+      properties:
+        sku_id: { type: string, format: uuid }
+        product_id: { type: string, format: uuid }
+        available_quantity: { type: integer, minimum: 0 }
+
+    EventPriceChanged:
+      type: object
+      required: [sku_id, product_id, old_price, new_price]
+      properties:
+        sku_id: { type: string, format: uuid }
+        product_id: { type: string, format: uuid }
+        old_price: { type: integer }
+        new_price: { type: integer }
