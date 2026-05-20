@@ -18,7 +18,7 @@
 |--------|--------|
 | Этот репо (бэкенд) | https://github.com/strannikhead/tochka-backend |
 | Общий протокольный репо | https://github.com/URFU2026-NeoMarket/neomarket-protocols |
-| Форк протоколов для PR | https://github.com/trueforme/tochka-neomarket |
+| ~~Форк протоколов для PR~~ | ~~https://github.com/trueforme/tochka-neomarket~~ |
 | Swagger UI (актуальный master) | https://urfu2026-neomarket.github.io/neomarket-protocols/ |
 | Гайд по курсу | https://github.com/tochka-public/NeoMarket---Student-Guide |
 | Сайт БРС и квестов | https://contract.tochka-urfu.tech |
@@ -32,17 +32,17 @@
 
 ### Как работать с API и квестами
 
-**Перед задачей — сверить OpenAPI:**  
+**Перед задачей — сверить OpenAPI:**
 Открыть [Swagger UI](https://urfu2026-neomarket.github.io/neomarket-protocols/) (master) и убедиться, что нужный эндпоинт уже есть.
 
-**Если эндпоинта нет в апстриме:**  
-Форкнуть [neomarket-protocols](https://github.com/URFU2026-NeoMarket/neomarket-protocols) → добавить/изменить `openapi.yaml` → открыть PR. Кто первый — получает бонусные баллы (speedrun-бонус: +50% / +30% / +10% Rep первым трём командам).
+~~**Если эндпоинта нет в апстриме:**
+Форкнуть [neomarket-protocols](https://github.com/URFU2026-NeoMarket/neomarket-protocols) → добавить/изменить `openapi.yaml` → открыть PR. Кто первый — получает бонусные баллы (speedrun-бонус: +50% / +30% / +10% Rep первым трём командам).~~
 
-**Если эндпоинт есть:**  
+**Если эндпоинт есть:**
 Идти на сайт [contract.tochka-urfu.tech](https://contract.tochka-urfu.tech), выбрать задачу, реализовать в коде.
 
-**Как сдавать квест:**  
-Открыть feature-ветку → реализовать → открыть PR в `main` этого репо.  
+**Как сдавать квест:**
+Открыть feature-ветку → реализовать → открыть PR в `main` этого репо.
 В описании PR обязательно указать **ADR**: какие альтернативы рассматривал, какую выбрал и почему.
 
 ---
@@ -69,7 +69,7 @@
 └─────────────────────────────────────────────────────────┘
 ```
 
-B2C обращается к B2B за актуальными ценами и остатками через async HTTP (httpx).  
+B2C обращается к B2B за актуальными ценами и остатками через async HTTP (httpx).
 Каждый сервис имеет свою PostgreSQL-базу и деплоится независимо.
 
 ---

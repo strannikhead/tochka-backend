@@ -1,1623 +1,1349 @@
-openapi: 3.1.0
+openapi: 3.0.3
 info:
-  title: NEO Market
+  title: NeoMarket B2B Service — Unified Schema
   version: 1.0.0
-  description: |
-    Авторизация продавца. Кабинет продавца. Создание товаров, SKU, управление ценами, накладные, изображения.
+  description: >-
+    Единая схема B2B-сервиса NeoMarket, собранная из наработок команд
+    «A», «fukhen-dukhen», «Без Диких Ягод», «мужчины и Поля» и приведённая
+    к каноническим flows проекта.
+
+    Принципы (type-unification):
+    - Все идентификаторы — string/uuid.
+    - Все денежные суммы — integer в копейках.
+    - snake_case во всех JSON-полях, `ordering` для порядка изображений.
+    - Пагинация: {items, total_count, limit, offset}.
+    - Ошибки: {code, message, details?}.
+    - Статусы товара: CREATED, ON_MODERATION, MODERATED, BLOCKED, HARD_BLOCKED.
+    - Каталог для B2C ходит через X-Service-Key (поля cost_price / reserved_quantity скрыты).
+    - События в Moderation и B2C идут через outbox с idempotency_key.
+  contact:
+    name: NeoMarket Team
+    email: team@neomarket.local
+
+servers:
+  - url: http://b2b:8000
+    description: Internal service URL (внутри docker compose)
+  - url: https://api.neomarket.local/b2b
+    description: Public API gateway
+
+tags:
+  - name: Auth
+    description: Регистрация / логин продавца, refresh, logout
+  - name: Seller
+    description: Профиль продавца
+  - name: Categories
+    description: Каталог категорий (модерируется через admin, но read открыт)
+  - name: Products
+    description: Карточки товаров (seller view, см. также Public Catalog)
+  - name: SKUs
+    description: Артикулы товара (цвет/размер/память и т. п.)
+  - name: Invoices
+    description: Накладные на пополнение остатков
+  - name: Images
+    description: Загрузка файлов (S3 / локальное хранилище)
+  - name: Public Catalog
+    description: Read-only витрина для B2C (через X-Service-Key)
+  - name: Inventory
+    description: Reserve / Unreserve / Fulfill — вызывается B2C
+  - name: Moderation Events
+    description: Приём событий MODERATED/BLOCKED от сервиса модерации
 
 paths:
-  /api/auth/register:
+  # ───────────────────── AUTH ─────────────────────
+  /api/v1/auth/register:
     post:
-      tags:
-        - Auth
+      tags: [Auth]
       summary: Регистрация продавца
-      operationId: register_api_auth_register_post
+      operationId: registerSeller
       requestBody:
+        required: true
         content:
           application/json:
-            schema:
-              $ref: "#/components/schemas/SellerCreate"
-        required: true
+            schema: { $ref: "#/components/schemas/SellerCreate" }
       responses:
         "201":
-          description: Successful Response
+          description: Успешная регистрация
           content:
             application/json:
-              schema:
-                $ref: "#/components/schemas/SellerResponse"
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-  /api/auth/login:
+              schema: { $ref: "#/components/schemas/TokenResponse" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+
+  /api/v1/auth/login:
     post:
-      tags:
-        - Auth
-      summary: Login
-      operationId: login_api_auth_login_post
+      tags: [Auth]
+      summary: Логин продавца
+      operationId: loginSeller
       requestBody:
-        content:
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: "#/components/schemas/Body_login_api_auth_login_post"
         required: true
-      responses:
-        "200":
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/TokenResponse"
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-  /api/auth/refresh:
-    post:
-      tags:
-        - Auth
-      summary: Обновить токены
-      operationId: refresh_api_auth_refresh_post
-      requestBody:
         content:
           application/json:
-            schema:
-              $ref: "#/components/schemas/RefreshRequest"
-        required: true
+            schema: { $ref: "#/components/schemas/LoginRequest" }
       responses:
         "200":
-          description: Successful Response
+          description: Успешный вход
           content:
             application/json:
-              schema:
-                $ref: "#/components/schemas/TokenResponse"
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-  /api/auth/logout:
+              schema: { $ref: "#/components/schemas/TokenResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+
+  /api/v1/auth/refresh:
     post:
-      tags:
-        - Auth
-      summary: Выход
-      operationId: logout_api_auth_logout_post
+      tags: [Auth]
+      summary: Обновление пары токенов (ротация refresh)
+      operationId: refreshTokens
       requestBody:
+        required: true
         content:
           application/json:
-            schema:
-              $ref: "#/components/schemas/RefreshRequest"
-        required: true
+            schema: { $ref: "#/components/schemas/RefreshRequest" }
       responses:
-        "204":
-          description: Successful Response
-        "422":
-          description: Validation Error
+        "200":
+          description: Новая пара токенов
           content:
             application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-  /api/seller/profile:
+              schema: { $ref: "#/components/schemas/TokenResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Выход (отзыв refresh-токена)
+      operationId: logoutSeller
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RefreshRequest" }
+      responses:
+        "204": { description: Refresh отозван }
+
+  # ───────────────────── SELLER ─────────────────────
+  /api/v1/sellers/me:
     get:
-      tags:
-        - Seller
-      summary: Мой профиль
-      operationId: get_my_data_api_seller_profile_get
+      tags: [Seller]
+      summary: Профиль текущего продавца
+      operationId: getMySellerProfile
+      security: [{ HTTPBearer: [] }]
       responses:
         "200":
-          description: Successful Response
+          description: OK
           content:
             application/json:
-              schema:
-                $ref: "#/components/schemas/SellerResponse"
-      security:
-        - OAuth2PasswordBearer: []
-  /api/seller/profile/update:
+              schema: { $ref: "#/components/schemas/SellerResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
     patch:
-      tags:
-        - Seller
-      summary: Обновить профиль
-      operationId: update_me_api_seller_profile_update_patch
+      tags: [Seller]
+      summary: Обновить профиль (IDOR-safe — id берётся из JWT)
+      operationId: updateMySellerProfile
+      security: [{ HTTPBearer: [] }]
       requestBody:
+        required: true
         content:
           application/json:
-            schema:
-              $ref: "#/components/schemas/SellerUpdate"
-        required: true
+            schema: { $ref: "#/components/schemas/SellerUpdate" }
       responses:
         "200":
-          description: Successful Response
+          description: Обновлено
           content:
             application/json:
-              schema:
-                $ref: "#/components/schemas/SellerResponse"
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-      security:
-        - OAuth2PasswordBearer: []
-  /api/seller/profile/delete:
+              schema: { $ref: "#/components/schemas/SellerResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationError" }
     delete:
-      tags:
-        - Seller
-      summary: Удалить аккаунт
-      operationId: delete_me_api_seller_profile_delete_delete
+      tags: [Seller]
+      summary: Удалить аккаунт продавца (soft-delete)
+      operationId: deleteMySellerAccount
+      security: [{ HTTPBearer: [] }]
       responses:
-        "204":
-          description: Successful Response
-      security:
-        - OAuth2PasswordBearer: []
-  /api/categories:
+        "204": { description: Аккаунт деактивирован }
+
+  # ───────────────────── CATEGORIES ─────────────────────
+  /api/v1/categories:
     get:
-      tags:
-        - Categories
-      summary: Список категорий
-      operationId: get_categories_api_categories_get
+      tags: [Categories]
+      summary: Список категорий (read-open)
+      operationId: listCategories
       parameters:
         - name: parent_id
           in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-                format: uuid
-              - type: "null"
-            title: Parent Id
+          schema: { type: string, format: uuid, nullable: true }
         - name: only_root
           in: query
-          required: false
-          schema:
-            type: boolean
-            default: false
-            title: Only Root
+          schema: { type: boolean, default: false }
       responses:
         "200":
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
                 type: array
-                items:
-                  $ref: "#/components/schemas/CategoryResponse"
-                title: Response Get Categories Api Categories Get
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
+                items: { $ref: "#/components/schemas/CategoryResponse" }
     post:
-      tags:
-        - Categories
-      summary: Создать категорию
-      operationId: create_category_api_categories_post
-      security:
-        - OAuth2PasswordBearer: []
+      tags: [Categories]
+      summary: Создать категорию (только админ)
+      operationId: createCategory
+      security: [{ HTTPBearer: [] }]
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: "#/components/schemas/CategoryCreate"
+            schema: { $ref: "#/components/schemas/CategoryCreate" }
       responses:
         "201":
-          description: Successful Response
+          description: Создана
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CategoryWithChildrenResponse"
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-  /api/categories/{category_id}:
+                { $ref: "#/components/schemas/CategoryWithChildrenResponse" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+
+  /api/v1/categories/tree:
     get:
-      tags:
-        - Categories
-      summary: Категория с подкатегориями
-      operationId: get_category_api_categories__category_id__get
-      parameters:
-        - name: category_id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-            title: Category Id
+      tags: [Categories]
+      summary: Полное дерево категорий (используется витриной)
+      operationId: getCategoriesTree
       responses:
         "200":
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CategoryWithChildrenResponse"
-        "422":
-          description: Validation Error
+                type: array
+                items: { $ref: "#/components/schemas/CategoryTreeResponse" }
+
+  /api/v1/categories/{category_id}:
+    parameters:
+      - {
+          name: category_id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+    get:
+      tags: [Categories]
+      summary: Категория с прямыми подкатегориями
+      operationId: getCategory
+      responses:
+        "200":
+          description: OK
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/HTTPValidationError"
+                { $ref: "#/components/schemas/CategoryWithChildrenResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
     patch:
-      tags:
-        - Categories
-      summary: Обновить категорию
-      operationId: update_category_api_categories__category_id__patch
-      security:
-        - OAuth2PasswordBearer: []
-      parameters:
-        - name: category_id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-            title: Category Id
+      tags: [Categories]
+      summary: Обновить категорию (только админ)
+      operationId: updateCategory
+      security: [{ HTTPBearer: [] }]
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: "#/components/schemas/CategoryUpdate"
+            schema: { $ref: "#/components/schemas/CategoryUpdate" }
       responses:
         "200":
-          description: Successful Response
+          description: Обновлена
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CategoryWithChildrenResponse"
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
+                { $ref: "#/components/schemas/CategoryWithChildrenResponse" }
     delete:
-      tags:
-        - Categories
-      summary: Удалить категорию
-      operationId: delete_category_api_categories__category_id__delete
-      security:
-        - OAuth2PasswordBearer: []
-      parameters:
-        - name: category_id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-            title: Category Id
+      tags: [Categories]
+      summary: Удалить категорию (только админ, если в ней нет товаров)
+      operationId: deleteCategory
+      security: [{ HTTPBearer: [] }]
       responses:
-        "204":
-          description: Successful Response
-        "422":
-          description: Validation Error
+        "204": { description: Удалена }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/v1/categories/{category_id}/breadcrumbs:
+    parameters:
+      - {
+          name: category_id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+    get:
+      tags: [Categories]
+      summary: Цепочка категорий от корня до текущей
+      operationId: getCategoryBreadcrumbs
+      responses:
+        "200":
+          description: OK
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-  /api/products:
+                type: array
+                items: { $ref: "#/components/schemas/CategoryResponse" }
+
+  # ───────────────────── PRODUCTS (seller view) ─────────────────────
+  /api/v1/products:
+    get:
+      tags: [Products]
+      summary: Список своих товаров (для продавца)
+      operationId: listMyProducts
+      security: [{ HTTPBearer: [] }]
+      parameters:
+        - {
+            name: limit,
+            in: query,
+            schema: { type: integer, default: 20, minimum: 1, maximum: 100 },
+          }
+        - {
+            name: offset,
+            in: query,
+            schema: { type: integer, default: 0, minimum: 0 },
+          }
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/ProductStatus" }
+        - name: include_deleted
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProductPaginatedResponse" }
     post:
-      tags:
-        - Products
-      summary: Создать товар
-      operationId: create_product_api_products_post
+      tags: [Products]
+      summary: Создать товар (без SKU → статус CREATED, на модерацию НЕ идёт)
+      operationId: createProduct
+      security: [{ HTTPBearer: [] }]
       requestBody:
+        required: true
         content:
           application/json:
-            schema:
-              $ref: "#/components/schemas/ProductCreate"
-        required: true
+            schema: { $ref: "#/components/schemas/ProductCreate" }
       responses:
         "201":
-          description: Successful Response
+          description: Создан
           content:
             application/json:
-              schema:
-                $ref: "#/components/schemas/ProductResponse"
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-      security:
-        - OAuth2PasswordBearer: []
-  /api/products/my:
+              schema: { $ref: "#/components/schemas/ProductResponse" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+
+  /api/v1/products/{product_id}:
+    parameters:
+      - {
+          name: product_id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
     get:
-      tags:
-        - Products
-      summary: Get My Products
-      operationId: get_my_products_api_products_my_get
-      security:
-        - OAuth2PasswordBearer: []
+      tags: [Products]
+      summary: Карточка товара (seller — полная, X-Service-Key — без cost_price/reserved_quantity)
+      operationId: getProduct
+      security: [{ HTTPBearer: [] }]
       parameters:
-        - name: limit
-          in: query
+        - name: X-Service-Key
+          in: header
           required: false
-          schema:
-            type: integer
-            default: 20
-            title: Limit
-        - name: offset
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 0
-            title: Offset
+          schema: { type: string, nullable: true }
       responses:
         "200":
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ProductListResponse"
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-  /api/products/{product_id}:
-    get:
-      tags:
-        - Products
-      summary: Получить товар по ID (для продавца)
-      operationId: get_product_api_products__product_id__get
-      security:
-        - OAuth2PasswordBearer: []
-      parameters:
-        - name: product_id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-            title: Product Id
-      responses:
-        "200":
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProductResponse"
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
+                oneOf:
+                  - $ref: "#/components/schemas/ProductResponse"
+                  - $ref: "#/components/schemas/ProductPublicResponse"
+        "404": { $ref: "#/components/responses/NotFound" }
     patch:
-      tags:
-        - Products
-      summary: Обновить товар
-      operationId: update_product_api_products__product_id__patch
-      security:
-        - OAuth2PasswordBearer: []
-      parameters:
-        - name: product_id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-            title: Product Id
+      tags: [Products]
+      summary: Редактирование. Если статус MODERATED/BLOCKED → перевод в ON_MODERATION + событие EDITED
+      operationId: updateProduct
+      security: [{ HTTPBearer: [] }]
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: "#/components/schemas/ProductUpdate"
+            schema: { $ref: "#/components/schemas/ProductUpdate" }
       responses:
         "200":
-          description: Successful Response
+          description: Обновлён
           content:
             application/json:
-              schema:
-                $ref: "#/components/schemas/ProductResponse"
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
+              schema: { $ref: "#/components/schemas/ProductResponse" }
+        "403": { $ref: "#/components/responses/Forbidden" } # HARD_BLOCKED, чужой товар
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationError" }
     delete:
-      tags:
-        - Products
-      summary: Удалить товар
-      operationId: delete_product_api_products__product_id__delete
-      security:
-        - OAuth2PasswordBearer: []
-      parameters:
-        - name: product_id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-            title: Product Id
+      tags: [Products]
+      summary: Мягкое удаление (deleted=true), событие DELETED в Moderation и B2C
+      operationId: deleteProduct
+      security: [{ HTTPBearer: [] }]
       responses:
-        "204":
-          description: Successful Response
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-  /api/products/images/{image_id}:
-    patch:
-      tags:
-        - Products
-      summary: Обновить изображение товара
-      operationId: update_product_image_api_products_images__image_id__patch
-      security:
-        - OAuth2PasswordBearer: []
-      parameters:
-        - name: image_id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-            title: Image Id
+        "204": { description: Помечен удалённым }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/products/{product_id}/images:
+    parameters:
+      - {
+          name: product_id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+    post:
+      tags: [Products]
+      summary: Прикрепить изображение к товару
+      operationId: addProductImage
+      security: [{ HTTPBearer: [] }]
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: "#/components/schemas/ProductImageUpdateRequest"
+            schema: { $ref: "#/components/schemas/ImageAttachRequest" }
+      responses:
+        "201":
+          description: Создано
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProductImageResponse" }
+
+  /api/v1/products/images/{image_id}:
+    parameters:
+      - {
+          name: image_id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+    patch:
+      tags: [Products]
+      summary: Обновить изображение товара (например, ordering)
+      operationId: updateProductImage
+      security: [{ HTTPBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ImageUpdateRequest" }
       responses:
         "200":
-          description: Successful Response
+          description: OK
           content:
             application/json:
-              schema:
-                $ref: "#/components/schemas/ProductImageResponse"
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
+              schema: { $ref: "#/components/schemas/ProductImageResponse" }
     delete:
-      tags:
-        - Products
+      tags: [Products]
       summary: Удалить изображение товара
-      operationId: delete_product_image_api_products_images__image_id__delete
-      security:
-        - OAuth2PasswordBearer: []
-      parameters:
-        - name: image_id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-            title: Image Id
+      operationId: deleteProductImage
+      security: [{ HTTPBearer: [] }]
       responses:
-        "204":
-          description: Successful Response
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-  /api/products/{product_id}/images:
-    post:
-      tags:
-        - Products
-      summary: Добавить изображение к товару
-      operationId: add_product_image_api_products__product_id__images_post
-      security:
-        - OAuth2PasswordBearer: []
-      parameters:
-        - name: product_id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-            title: Product Id
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ProductImageCreateRequest"
-      responses:
-        "201":
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProductImageResponse"
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-  /api/skus/by-product/{product_id}:
+        "204": { description: Удалено }
+
+  # ───────────────────── SKUs ─────────────────────
+  /api/v1/products/{product_id}/skus:
+    parameters:
+      - {
+          name: product_id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
     get:
-      tags:
-        - SKUs
-      summary: Все SKU товара
-      operationId: get_skus_by_product_api_skus_by_product__product_id__get
-      security:
-        - OAuth2PasswordBearer: []
-      parameters:
-        - name: product_id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-            title: Product Id
+      tags: [SKUs]
+      summary: Все SKU товара (seller view)
+      operationId: listProductSkus
+      security: [{ HTTPBearer: [] }]
       responses:
         "200":
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
                 type: array
-                items:
-                  $ref: "#/components/schemas/SKUResponse"
-                title: Response Get Skus By Product Api Skus By Product  Product Id  Get
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-  /api/skus/{sku_id}:
-    get:
-      tags:
-        - SKUs
-      summary: Получить SKU
-      operationId: get_sku_api_skus__sku_id__get
-      security:
-        - OAuth2PasswordBearer: []
-      parameters:
-        - name: sku_id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-            title: Sku Id
-      responses:
-        "200":
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SKUResponse"
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-    patch:
-      tags:
-        - SKUs
-      summary: Обновить SKU
-      operationId: update_sku_api_skus__sku_id__patch
-      security:
-        - OAuth2PasswordBearer: []
-      parameters:
-        - name: sku_id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-            title: Sku Id
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/SKUUpdate"
-      responses:
-        "200":
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SKUResponse"
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-    delete:
-      tags:
-        - SKUs
-      summary: Удалить SKU
-      operationId: delete_sku_api_skus__sku_id__delete
-      security:
-        - OAuth2PasswordBearer: []
-      parameters:
-        - name: sku_id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-            title: Sku Id
-      responses:
-        "204":
-          description: Successful Response
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-  /api/skus/create:
+                items: { $ref: "#/components/schemas/SKUResponse" }
+
+  /api/v1/skus:
     post:
-      tags:
-        - SKUs
-      summary: Создать SKU
-      operationId: create_sku_api_skus_create_post
+      tags: [SKUs]
+      summary: Создать SKU. Первый SKU товара → товар ON_MODERATION + событие CREATED
+      operationId: createSku
+      security: [{ HTTPBearer: [] }]
       requestBody:
+        required: true
         content:
           application/json:
-            schema:
-              $ref: "#/components/schemas/SKUCreate"
-        required: true
+            schema: { $ref: "#/components/schemas/SKUCreate" }
       responses:
         "201":
-          description: Successful Response
+          description: Создан
           content:
             application/json:
-              schema:
-                $ref: "#/components/schemas/SKUResponse"
-        "422":
-          description: Validation Error
+              schema: { $ref: "#/components/schemas/SKUResponse" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+
+  /api/v1/skus/{sku_id}:
+    parameters:
+      - {
+          name: sku_id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+    get:
+      tags: [SKUs]
+      summary: Получить SKU (seller view)
+      operationId: getSku
+      security: [{ HTTPBearer: [] }]
+      responses:
+        "200":
+          description: OK
           content:
             application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-      security:
-        - OAuth2PasswordBearer: []
-  /api/skus/images/{image_id}:
+              schema: { $ref: "#/components/schemas/SKUResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
     patch:
-      tags:
-        - SKUs
+      tags: [SKUs]
+      summary: Обновить SKU. Если товар MODERATED/BLOCKED → ON_MODERATION + событие EDITED
+      operationId: updateSku
+      security: [{ HTTPBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SKUUpdate" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SKUResponse" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+    delete:
+      tags: [SKUs]
+      summary: Удалить SKU. Запрещено, если reserved_quantity > 0
+      operationId: deleteSku
+      security: [{ HTTPBearer: [] }]
+      responses:
+        "204": { description: Удалён }
+        "409":
+          description: Есть активные резервы
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/skus/{sku_id}/images:
+    parameters:
+      - {
+          name: sku_id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+    post:
+      tags: [SKUs]
+      summary: Прикрепить изображение к SKU
+      operationId: addSkuImage
+      security: [{ HTTPBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ImageAttachRequest" }
+      responses:
+        "201":
+          description: Создано
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SKUImageResponse" }
+
+  /api/v1/skus/images/{image_id}:
+    parameters:
+      - {
+          name: image_id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+    patch:
+      tags: [SKUs]
       summary: Обновить изображение SKU
-      operationId: update_sku_image_api_skus_images__image_id__patch
-      security:
-        - OAuth2PasswordBearer: []
-      parameters:
-        - name: image_id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-            title: Image Id
+      operationId: updateSkuImage
+      security: [{ HTTPBearer: [] }]
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: "#/components/schemas/SKUImageUpdateRequest"
+            schema: { $ref: "#/components/schemas/ImageUpdateRequest" }
       responses:
         "200":
-          description: Successful Response
+          description: OK
           content:
             application/json:
-              schema:
-                $ref: "#/components/schemas/SKUImageResponse"
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
+              schema: { $ref: "#/components/schemas/SKUImageResponse" }
     delete:
-      tags:
-        - SKUs
+      tags: [SKUs]
       summary: Удалить изображение SKU
-      operationId: delete_sku_image_api_skus_images__image_id__delete
-      security:
-        - OAuth2PasswordBearer: []
-      parameters:
-        - name: image_id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-            title: Image Id
+      operationId: deleteSkuImage
+      security: [{ HTTPBearer: [] }]
       responses:
-        "204":
-          description: Successful Response
-        "422":
-          description: Validation Error
+        "204": { description: Удалено }
+
+  # ───────────────────── INVOICES ─────────────────────
+  /api/v1/invoices:
+    get:
+      tags: [Invoices]
+      summary: Список накладных продавца
+      operationId: listInvoices
+      security: [{ HTTPBearer: [] }]
+      parameters:
+        - {
+            name: limit,
+            in: query,
+            schema: { type: integer, default: 20, minimum: 1, maximum: 100 },
+          }
+        - {
+            name: offset,
+            in: query,
+            schema: { type: integer, default: 0, minimum: 0 },
+          }
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/InvoiceStatus" }
+      responses:
+        "200":
+          description: OK
           content:
             application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-  /api/skus/{sku_id}/images:
+              schema: { $ref: "#/components/schemas/InvoicePaginatedResponse" }
     post:
-      tags:
-        - SKUs
-      summary: Добавить изображение к SKU
-      operationId: add_sku_image_api_skus__sku_id__images_post
-      security:
-        - OAuth2PasswordBearer: []
-      parameters:
-        - name: sku_id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-            title: Sku Id
+      tags: [Invoices]
+      summary: Создать накладную (в статусе CREATED)
+      operationId: createInvoice
+      security: [{ HTTPBearer: [] }]
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: "#/components/schemas/SKUImageCreateRequest"
+            schema: { $ref: "#/components/schemas/InvoiceCreate" }
       responses:
         "201":
-          description: Successful Response
+          description: OK
           content:
             application/json:
-              schema:
-                $ref: "#/components/schemas/SKUImageResponse"
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-  /api/invoices:
+              schema: { $ref: "#/components/schemas/InvoiceResponse" }
+
+  /api/v1/invoices/{invoice_id}:
+    parameters:
+      - {
+          name: invoice_id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
     get:
-      tags:
-        - Invoices
-      summary: Список накладных
-      operationId: get_invoices_api_invoices_get
-      security:
-        - OAuth2PasswordBearer: []
-      parameters:
-        - name: limit
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 20
-            title: Limit
-        - name: offset
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 0
-            title: Offset
+      tags: [Invoices]
+      summary: Получить накладную (только если seller_id == JWT.sub)
+      operationId: getInvoice
+      security: [{ HTTPBearer: [] }]
       responses:
         "200":
-          description: Successful Response
+          description: OK
           content:
             application/json:
-              schema:
-                $ref: "#/components/schemas/InvoiceListResponse"
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-    post:
-      tags:
-        - Invoices
-      summary: Создать накладную
-      operationId: create_invoice_api_invoices_post
-      security:
-        - OAuth2PasswordBearer: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/InvoiceCreate"
-      responses:
-        "201":
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/InvoiceResponse"
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-  /api/invoices/{invoice_id}:
-    get:
-      tags:
-        - Invoices
-      summary: Получить накладную
-      operationId: get_invoice_api_invoices__invoice_id__get
-      security:
-        - OAuth2PasswordBearer: []
-      parameters:
-        - name: invoice_id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-            title: Invoice Id
-      responses:
-        "200":
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/InvoiceResponse"
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
+              schema: { $ref: "#/components/schemas/InvoiceResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
     delete:
-      tags:
-        - Invoices
-      summary: Удалить накладную (только со статусом CREATED)
-      operationId: delete_invoice_api_invoices__invoice_id__delete
-      security:
-        - OAuth2PasswordBearer: []
-      parameters:
-        - name: invoice_id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-            title: Invoice Id
+      tags: [Invoices]
+      summary: Удалить накладную (только в статусе CREATED)
+      operationId: deleteInvoice
+      security: [{ HTTPBearer: [] }]
       responses:
-        "204":
-          description: Successful Response
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-  /api/invoices/{invoice_id}/accept:
+        "204": { description: Удалена }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/v1/invoices/{invoice_id}/accept:
+    parameters:
+      - {
+          name: invoice_id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
     post:
-      tags:
-        - Invoices
-      summary: Принять накладную — пополнить остатки SKU
-      operationId: accept_invoice_api_invoices__invoice_id__accept_post
-      security:
-        - OAuth2PasswordBearer: []
-      parameters:
-        - name: invoice_id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-            title: Invoice Id
+      tags: [Invoices]
+      summary: |
+        Приёмка накладной оператором/админом. Атомарно увеличивает active_quantity
+        указанных SKU. Поддерживается частичная приёмка (accepted_items).
+      operationId: acceptInvoice
+      security: [{ HTTPBearer: [] }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InvoiceAcceptRequest" }
       responses:
         "200":
-          description: Successful Response
+          description: Принята (полностью или частично)
           content:
             application/json:
-              schema:
-                $ref: "#/components/schemas/InvoiceResponse"
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-  /api/upload/image:
+              schema: { $ref: "#/components/schemas/InvoiceResponse" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  # ───────────────────── IMAGES (raw upload) ─────────────────────
+  /api/v1/images:
     post:
-      tags:
-        - Upload
-      summary: Загрузить изображение
-      operationId: upload_image_endpoint_api_upload_image_post
+      tags: [Images]
+      summary: Загрузить файл изображения (multipart). Возвращает url + id.
+      operationId: uploadImage
+      security: [{ HTTPBearer: [] }]
       requestBody:
+        required: true
         content:
           multipart/form-data:
-            schema:
-              $ref: "#/components/schemas/Body_upload_image_endpoint_api_upload_image_post"
-        required: true
+            schema: { $ref: "#/components/schemas/ImageUploadRequest" }
       responses:
         "201":
-          description: Successful Response
+          description: Файл сохранён
           content:
             application/json:
-              schema:
-                $ref: "#/components/schemas/UploadResponse"
-        "422":
-          description: Validation Error
+              schema: { $ref: "#/components/schemas/ImageUploadResponse" }
+        "413":
+          description: Файл больше 5 МБ
           content:
             application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-      security:
-        - OAuth2PasswordBearer: []
-  /api/public/categories/tree:
+              schema: { $ref: "#/components/schemas/Error" }
+        "415":
+          description: Неподдерживаемый формат (magic bytes check)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  # ───────────────────── PUBLIC CATALOG (для B2C через X-Service-Key) ─────────────────────
+  /api/v1/public/products:
     get:
-      tags:
-        - Public Catalog
-      summary: Get Categories Tree
-      operationId: get_categories_tree_api_public_categories_tree_get
+      tags: [Public Catalog]
+      summary: Витрина — только MODERATED, не deleted, active_quantity > 0
+      operationId: listPublicProducts
+      parameters:
+        - {
+            name: X-Service-Key,
+            in: header,
+            required: true,
+            schema: { type: string },
+          }
+        - {
+            name: category_id,
+            in: query,
+            schema: { type: string, format: uuid, nullable: true },
+          }
+        - {
+            name: search,
+            in: query,
+            schema: { type: string, nullable: true, minLength: 3 },
+          }
+        - {
+            name: min_price,
+            in: query,
+            schema: { type: integer, minimum: 0, nullable: true },
+          }
+        - {
+            name: max_price,
+            in: query,
+            schema: { type: integer, minimum: 0, nullable: true },
+          }
+        - {
+            name: seller_id,
+            in: query,
+            schema: { type: string, format: uuid, nullable: true },
+          }
+        - name: filters
+          in: query
+          style: deepObject
+          explode: true
+          description: |
+            Динамические фильтры по характеристикам, snake_case ключи.
+            Пример: ?filters[brand]=apple&filters[brand]=samsung&filters[memory]=256
+          schema:
+            type: object
+            additionalProperties:
+              oneOf:
+                - { type: string }
+                - { type: array, items: { type: string } }
+                - { type: number }
+                - { type: boolean }
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [price_asc, price_desc, created_desc, popular]
+            default: created_desc
+        - {
+            name: limit,
+            in: query,
+            schema: { type: integer, default: 20, minimum: 1, maximum: 100 },
+          }
+        - {
+            name: offset,
+            in: query,
+            schema: { type: integer, default: 0, minimum: 0 },
+          }
       responses:
         "200":
-          description: Successful Response
+          description: OK
+          content:
+            application/json:
+              schema:
+                { $ref: "#/components/schemas/ProductPublicPaginatedResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/public/products/batch:
+    post:
+      tags: [Public Catalog]
+      summary: Batch-получение карточек по списку product_id (для корзины B2C)
+      operationId: batchPublicProducts
+      parameters:
+        - {
+            name: X-Service-Key,
+            in: header,
+            required: true,
+            schema: { type: string },
+          }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [product_ids]
+              properties:
+                product_ids:
+                  type: array
+                  items: { type: string, format: uuid }
+                  maxItems: 100
+      responses:
+        "200":
+          description: |
+            Возвращает массив только для существующих и публикуемых товаров.
+            Отсутствующие в ответе товары B2C трактует как unavailable.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ProductPublicResponse" }
+
+  /api/v1/public/products/{product_id}:
+    parameters:
+      - {
+          name: product_id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+    get:
+      tags: [Public Catalog]
+      summary: Карточка товара для витрины
+      operationId: getPublicProduct
+      parameters:
+        - {
+            name: X-Service-Key,
+            in: header,
+            required: true,
+            schema: { type: string },
+          }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProductPublicResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/public/products/{product_id}/similar:
+    parameters:
+      - {
+          name: product_id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
+    get:
+      tags: [Public Catalog]
+      summary: Похожие товары (случайная выборка из той же категории)
+      operationId: getPublicSimilarProducts
+      parameters:
+        - {
+            name: X-Service-Key,
+            in: header,
+            required: true,
+            schema: { type: string },
+          }
+        - {
+            name: limit,
+            in: query,
+            schema: { type: integer, default: 10, minimum: 1, maximum: 50 },
+          }
+      responses:
+        "200":
+          description: OK
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/CategoryWithChildrenResponse"
-  /api/public/categories/{category_id}/breadcrumbs:
+                  { $ref: "#/components/schemas/ProductPublicShortResponse" }
+
+  /api/v1/public/skus/{sku_id}:
+    parameters:
+      - {
+          name: sku_id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
     get:
-      tags:
-        - Public Catalog
-      summary: Get Breadcrumbs
-      operationId: get_breadcrumbs_api_public_categories__category_id__breadcrumbs_get
+      tags: [Public Catalog]
+      summary: SKU для витрины (без cost_price / reserved_quantity)
+      operationId: getPublicSku
       parameters:
-        - name: category_id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-            title: Category Id
+        - {
+            name: X-Service-Key,
+            in: header,
+            required: true,
+            schema: { type: string },
+          }
       responses:
         "200":
-          description: Successful Response
+          description: OK
           content:
             application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/CategoryResponse"
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-  /api/public/products:
-    get:
-      tags:
-        - Public Catalog
-      summary: Get Products Public
-      operationId: get_products_public_api_public_products_get
+              schema: { $ref: "#/components/schemas/SKUPublicResponse" }
+
+  # ───────────────────── INVENTORY ─────────────────────
+  /api/v1/inventory/reserve:
+    post:
+      tags: [Inventory]
+      summary: |
+        All-or-nothing резервирование SKU (вызывается B2C при checkout).
+        Использует SELECT FOR UPDATE по всем sku_id. При active_quantity=0 →
+        отправляет событие SKU_OUT_OF_STOCK в B2C. Идемпотентно по idempotency_key (TTL 1 час).
+      operationId: reserveInventory
       parameters:
-        - name: category_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-                format: uuid
-              - type: "null"
-            title: Category Id
-        - name: search
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: "null"
-            title: Search
-        - name: min_price
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: integer
-                minimum: 0
-              - type: "null"
-            description: Минимальная цена
-            title: Min Price
-          description: Минимальная цена
-        - name: max_price
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: integer
-                minimum: 0
-              - type: "null"
-            description: Максимальная цена
-            title: Max Price
-          description: Максимальная цена
-        - name: seller_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-                format: uuid
-              - type: "null"
-            title: Seller Id
-        - name: page
-          in: query
-          required: false
-          schema:
-            type: integer
-            minimum: 1
-            description: Номер страницы
-            default: 1
-            title: Page
-          description: Номер страницы
-        - name: size
-          in: query
-          required: false
-          schema:
-            type: integer
-            maximum: 100
-            minimum: 1
-            description: Товаров на странице
-            default: 20
-            title: Size
-          description: Товаров на странице
+        - {
+            name: X-Service-Key,
+            in: header,
+            required: true,
+            schema: { type: string },
+          }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReserveRequest" }
       responses:
         "200":
-          description: Successful Response
+          description: Зарезервировано (или идемпотентный повтор)
           content:
             application/json:
-              schema:
-                $ref: "#/components/schemas/ProductListResponse"
-        "422":
-          description: Validation Error
+              schema: { $ref: "#/components/schemas/ReserveResponse" }
+        "409":
+          description: |
+            Не удалось зарезервировать (недостаточно остатка / товар заблокирован).
+            В details — список проблемных sku.
           content:
             application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-  /api/public/products/{product_id}:
-    get:
-      tags:
-        - Public Catalog
-      summary: Get Product Public
-      operationId: get_product_public_api_public_products__product_id__get
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/inventory/unreserve:
+    post:
+      tags: [Inventory]
+      summary: Снять резерв (при отмене заказа). Идемпотентно по order_id.
+      operationId: unreserveInventory
       parameters:
-        - name: product_id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-            title: Product Id
+        - {
+            name: X-Service-Key,
+            in: header,
+            required: true,
+            schema: { type: string },
+          }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InventoryOrderRequest" }
       responses:
         "200":
-          description: Successful Response
+          description: Снято
           content:
             application/json:
-              schema:
-                $ref: "#/components/schemas/ProductResponse"
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-  /api/public/products/{product_id}/similar:
-    get:
-      tags:
-        - Public Catalog
-      summary: Get Similar Products Public
-      operationId: get_similar_products_public_api_public_products__product_id__similar_get
+              schema: { $ref: "#/components/schemas/InventoryOrderResponse" }
+
+  /api/v1/inventory/fulfill:
+    post:
+      tags: [Inventory]
+      summary: |
+        Списание резерва при доставке (вызывается B2C admin при переходе заказа
+        в DELIVERED). Уменьшает reserved_quantity и stock_quantity.
+      operationId: fulfillInventory
       parameters:
-        - name: product_id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-            title: Product Id
-        - name: limit
-          in: query
-          required: false
-          schema:
-            type: integer
-            maximum: 50
-            minimum: 1
-            description: Количество похожих товаров
-            default: 10
-            title: Limit
-          description: Количество похожих товаров
+        - {
+            name: X-Service-Key,
+            in: header,
+            required: true,
+            schema: { type: string },
+          }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InventoryOrderRequest" }
       responses:
         "200":
-          description: Successful Response
+          description: Списано
           content:
             application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/ProductResponse"
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
-  /api/public/skus/{sku_id}:
-    get:
-      tags:
-        - Public Catalog
-      summary: Get Sku Public
-      operationId: get_sku_public_api_public_skus__sku_id__get
+              schema: { $ref: "#/components/schemas/InventoryOrderResponse" }
+
+  # ───────────────────── MODERATION EVENTS ─────────────────────
+  /api/v1/moderation/events:
+    post:
+      tags: [Moderation Events]
+      summary: |
+        Приём событий от Moderation Service: MODERATED, BLOCKED (с hard_block flag).
+        Идемпотентность через (sender_service, idempotency_key), TTL 24 часа.
+        BLOCKED → если в БД были active_quantity>0 — также отправляются события
+        в B2C (PRODUCT_BLOCKED).
+      operationId: receiveModerationEvent
       parameters:
-        - name: sku_id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-            title: Sku Id
+        - {
+            name: X-Service-Key,
+            in: header,
+            required: true,
+            schema: { type: string },
+          }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ModerationEventRequest" }
       responses:
-        "200":
-          description: Successful Response
+        "204": { description: Принято и обработано (или дубликат) }
+        "400":
+          description: Невалидное тело события (не ретраить)
           content:
             application/json:
-              schema:
-                $ref: "#/components/schemas/SKUResponse"
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
 components:
+  securitySchemes:
+    HTTPBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    Unauthorized:
+      description: Не авторизован / неверный токен
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: Нет доступа (IDOR, HARD_BLOCKED, чужой ресурс)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Не найдено
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Conflict:
+      description: Конфликт состояния
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    ValidationError:
+      description: Невалидные данные
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
   schemas:
-    Body_login_api_auth_login_post:
+    # ─── Общие типы ───
+    Error:
+      type: object
+      required: [code, message]
       properties:
-        grant_type:
-          anyOf:
-            - type: string
-              pattern: ^password$
-            - type: "null"
-          title: Grant Type
-        username:
-          type: string
-          title: Username
-        password:
-          type: string
-          format: password
-          title: Password
-        scope:
-          type: string
-          title: Scope
-          default: ""
-        client_id:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Client Id
-        client_secret:
-          anyOf:
-            - type: string
-            - type: "null"
-          format: password
-          title: Client Secret
+        code: { type: string, example: VALIDATION_ERROR }
+        message: { type: string, example: "Поле 'title' обязательно" }
+        details:
+          type: object
+          additionalProperties: true
+          nullable: true
+
+    # ─── Pagination ───
+    PaginationMeta:
+      type: object
+      required: [total_count, limit, offset]
+      properties:
+        total_count: { type: integer, minimum: 0 }
+        limit: { type: integer, minimum: 1 }
+        offset: { type: integer, minimum: 0 }
+      description: "Унифицированный объект пагинации"
+
+    # ─── Auth ───
+    SellerCreate:
+      type: object
+      required: [email, password, first_name, last_name, company_name, inn]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8, maxLength: 128 }
+        first_name: { type: string, minLength: 1, maxLength: 100 }
+        last_name: { type: string, minLength: 1, maxLength: 100 }
+        middle_name: { type: string, nullable: true }
+        company_name: { type: string }
+        inn: { type: string, minLength: 10, maxLength: 12 }
+        phone: { type: string, nullable: true }
+
+    SellerUpdate:
+      type: object
+      properties:
+        first_name: { type: string, nullable: true }
+        last_name: { type: string, nullable: true }
+        middle_name: { type: string, nullable: true }
+        company_name: { type: string, nullable: true }
+        phone: { type: string, nullable: true }
+
+    SellerResponse:
       type: object
       required:
-        - username
-        - password
-      title: Body_login_api_auth_login_post
-    Body_upload_image_endpoint_api_upload_image_post:
+        [
+          id,
+          email,
+          first_name,
+          last_name,
+          company_name,
+          inn,
+          created_at,
+          updated_at,
+        ]
       properties:
-        file:
-          type: string
-          contentMediaType: application/octet-stream
-          title: File
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        first_name: { type: string }
+        last_name: { type: string }
+        middle_name: { type: string, nullable: true }
+        company_name: { type: string }
+        inn: { type: string }
+        phone: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    LoginRequest:
       type: object
-      required:
-        - file
-      title: Body_upload_image_endpoint_api_upload_image_post
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+
+    RefreshRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token: { type: string }
+
+    TokenResponse:
+      type: object
+      required: [user_id, access_token, refresh_token, expires_in, token_type]
+      properties:
+        user_id: { type: string, format: uuid }
+        access_token: { type: string }
+        refresh_token: { type: string }
+        token_type: { type: string, default: Bearer }
+        expires_in: { type: integer, description: TTL access-токена в секундах }
+
+    # ─── Categories ───
     CategoryCreate:
-      properties:
-        name:
-          type: string
-          title: Name
-        parent_id:
-          anyOf:
-            - type: string
-              format: uuid
-            - type: "null"
-          title: Parent Id
       type: object
-      required:
-        - name
-      title: CategoryCreate
-    CategoryResponse:
+      required: [name]
       properties:
-        id:
-          type: string
-          format: uuid
-          title: Id
-        name:
-          type: string
-          title: Name
-        parent_id:
-          anyOf:
-            - type: string
-              format: uuid
-            - type: "null"
-          title: Parent Id
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-      type: object
-      required:
-        - id
-        - name
-        - parent_id
-        - created_at
-      title: CategoryResponse
+        name: { type: string, minLength: 1, maxLength: 255 }
+        parent_id: { type: string, format: uuid, nullable: true }
+
     CategoryUpdate:
-      properties:
-        name:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Name
-        parent_id:
-          anyOf:
-            - type: string
-              format: uuid
-            - type: "null"
-          title: Parent Id
       type: object
-      title: CategoryUpdate
+      properties:
+        name: { type: string, nullable: true }
+        parent_id: { type: string, format: uuid, nullable: true }
+        is_active: { type: boolean, nullable: true }
+
+    CategoryResponse:
+      type: object
+      required: [id, name, parent_id, level, path, is_active, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        parent_id: { type: string, format: uuid, nullable: true }
+        level: { type: integer, description: "Глубина в дереве, корень=0" }
+        path:
+          {
+            type: string,
+            description: "Materialized path, например electronics/phones",
+          }
+        is_active: { type: boolean }
+        created_at: { type: string, format: date-time }
+
     CategoryWithChildrenResponse:
+      allOf:
+        - $ref: "#/components/schemas/CategoryResponse"
+        - type: object
+          required: [children]
+          properties:
+            children:
+              type: array
+              items: { $ref: "#/components/schemas/CategoryResponse" }
+
+    CategoryTreeResponse:
+      type: object
+      required: [id, name, children]
       properties:
-        id:
-          type: string
-          format: uuid
-          title: Id
-        name:
-          type: string
-          title: Name
-        parent_id:
-          anyOf:
-            - type: string
-              format: uuid
-            - type: "null"
-          title: Parent Id
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
+        id: { type: string, format: uuid }
+        name: { type: string }
         children:
-          items:
-            $ref: "#/components/schemas/CategoryResponse"
           type: array
-          title: Children
+          items: { $ref: "#/components/schemas/CategoryTreeResponse" }
+
+    # ─── Products ───
+    ProductStatus:
+      type: string
+      enum: [CREATED, ON_MODERATION, MODERATED, BLOCKED, HARD_BLOCKED]
+      description: |
+        CREATED — товар создан, нет SKU, не на модерации.
+        ON_MODERATION — отправлен на модерацию.
+        MODERATED — одобрен, виден в каталоге.
+        BLOCKED — мягкая блокировка, можно отредактировать и снова отправить.
+        HARD_BLOCKED — жёсткая блокировка, редактирование запрещено.
+
+    Characteristic:
+      type: object
+      required: [name, value]
+      properties:
+        name: { type: string, example: "Бренд" }
+        value: { type: string, example: "Apple" }
+
+    CharacteristicResponse:
+      allOf:
+        - $ref: "#/components/schemas/Characteristic"
+        - type: object
+          required: [id]
+          properties:
+            id: { type: string, format: uuid }
+
+    ProductImageCreate:
+      type: object
+      required: [url]
+      properties:
+        url:
+          {
+            type: string,
+            description: URL уже загруженного изображения (из /api/v1/images),
+          }
+        ordering: { type: integer, default: 0 }
+
+    ProductImageResponse:
+      type: object
+      required: [id, url, ordering]
+      properties:
+        id: { type: string, format: uuid }
+        url: { type: string }
+        ordering: { type: integer }
+
+    ProductCreate:
+      type: object
+      required: [title, description, category_id]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 255 }
+        description: { type: string, minLength: 1, maxLength: 5000 }
+        category_id: { type: string, format: uuid }
+        slug: { type: string, nullable: true }
+        images:
+          type: array
+          items: { $ref: "#/components/schemas/ProductImageCreate" }
           default: []
-      type: object
-      required:
-        - id
-        - name
-        - parent_id
-        - created_at
-      title: CategoryWithChildrenResponse
-    HTTPValidationError:
-      properties:
-        detail:
-          items:
-            $ref: "#/components/schemas/ValidationError"
+        characteristics:
           type: array
-          title: Detail
+          items: { $ref: "#/components/schemas/Characteristic" }
+          default: []
+
+    ProductUpdate:
       type: object
-      title: HTTPValidationError
-    InvoiceCreate:
+      description: Семантика PATCH — все поля опциональны.
       properties:
-        items:
-          items:
-            $ref: "#/components/schemas/InvoiceItemCreate"
+        title: { type: string, nullable: true, minLength: 1, maxLength: 255 }
+        description: { type: string, nullable: true, maxLength: 5000 }
+        category_id: { type: string, format: uuid, nullable: true }
+        characteristics:
           type: array
-          title: Items
+          nullable: true
+          items: { $ref: "#/components/schemas/Characteristic" }
+
+    ProductResponse:
       type: object
-      required:
-        - items
-      title: InvoiceCreate
-    InvoiceItemCreate:
-      properties:
-        sku_id:
-          type: string
-          format: uuid
-          title: Sku Id
-        quantity:
-          type: integer
-          title: Quantity
-      type: object
-      required:
-        - sku_id
-        - quantity
-      title: InvoiceItemCreate
-    InvoiceItemResponse:
-      properties:
-        id:
-          type: string
-          format: uuid
-          title: Id
-        sku_id:
-          type: string
-          format: uuid
-          title: Sku Id
-        quantity:
-          type: integer
-          title: Quantity
-      type: object
-      required:
-        - id
-        - sku_id
-        - quantity
-      title: InvoiceItemResponse
-    InvoiceListResponse:
-      properties:
-        total:
-          type: integer
-          title: Total
-        items:
-          items:
-            $ref: "#/components/schemas/InvoiceResponse"
-          type: array
-          title: Items
-      type: object
-      required:
-        - total
-        - items
-      title: InvoiceListResponse
-    InvoiceResponse:
-      properties:
-        id:
-          type: string
-          format: uuid
-          title: Id
-        seller_id:
-          type: string
-          format: uuid
-          title: Seller Id
-        status:
-          $ref: "#/components/schemas/InvoiceStatus"
-        items:
-          items:
-            $ref: "#/components/schemas/InvoiceItemResponse"
-          type: array
-          title: Items
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-      type: object
+      description: Полный seller-view (включает cost_price / reserved_quantity у SKU)
       required:
         - id
         - seller_id
+        - category_id
+        - title
+        - slug
+        - description
         - status
-        - items
+        - deleted
+        - blocking_reason_id
+        - moderator_comment
+        - images
+        - characteristics
+        - skus
         - created_at
         - updated_at
-      title: InvoiceResponse
-    InvoiceStatus:
-      type: string
-      enum:
-        - CREATED
-        - ACCEPTED
-      title: InvoiceStatus
-    ProductCharacteristicCreate:
       properties:
-        name:
-          type: string
-          title: Name
-        value:
-          type: string
-          title: Value
-      type: object
-      required:
-        - name
-        - value
-      title: ProductCharacteristicCreate
-    ProductCharacteristicResponse:
-      properties:
-        id:
-          type: string
-          format: uuid
-          title: Id
-        name:
-          type: string
-          title: Name
-        value:
-          type: string
-          title: Value
-      type: object
-      required:
-        - id
-        - name
-        - value
-      title: ProductCharacteristicResponse
-    ProductCreate:
-      properties:
-        category_id:
-          type: string
-          format: uuid
-          title: Category Id
-        title:
-          type: string
-          title: Title
-        description:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Description
+        id: { type: string, format: uuid }
+        seller_id: { type: string, format: uuid }
+        category_id: { type: string, format: uuid }
+        title: { type: string }
+        slug: { type: string }
+        description: { type: string }
+        status: { $ref: "#/components/schemas/ProductStatus" }
+        deleted: { type: boolean }
+        blocking_reason_id: { type: string, format: uuid, nullable: true }
+        moderator_comment: { type: string, nullable: true }
         images:
-          items:
-            $ref: "#/components/schemas/ProductImageCreate"
           type: array
-          title: Images
-          default: []
+          items: { $ref: "#/components/schemas/ProductImageResponse" }
         characteristics:
-          items:
-            $ref: "#/components/schemas/ProductCharacteristicCreate"
           type: array
-          title: Characteristics
-          default: []
-      type: object
-      required:
-        - category_id
-        - title
-      title: ProductCreate
-    ProductImageCreate:
-      properties:
-        url:
-          type: string
-          title: Url
-        ordering:
-          type: integer
-          title: Ordering
-          default: 0
-      type: object
-      required:
-        - url
-      title: ProductImageCreate
-    ProductImageCreateRequest:
-      properties:
-        url:
-          type: string
-          title: Url
-        ordering:
-          type: integer
-          title: Ordering
-          default: 0
-      type: object
-      required:
-        - url
-      title: ProductImageCreateRequest
-    ProductImageResponse:
-      properties:
-        id:
-          type: string
-          format: uuid
-          title: Id
-        url:
-          type: string
-          title: Url
-        ordering:
-          type: integer
-          title: Ordering
-      type: object
-      required:
-        - id
-        - url
-        - ordering
-      title: ProductImageResponse
-    ProductImageUpdateRequest:
-      properties:
-        url:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Url
-        ordering:
-          anyOf:
-            - type: integer
-            - type: "null"
-          title: Ordering
-      type: object
-      title: ProductImageUpdateRequest
-    ProductListResponse:
-      properties:
-        total:
-          type: integer
-          title: Total
-        items:
-          items:
-            $ref: "#/components/schemas/ProductShortResponse"
-          type: array
-          title: Items
-      type: object
-      required:
-        - total
-        - items
-      title: ProductListResponse
-    ProductResponse:
-      properties:
-        id:
-          type: string
-          format: uuid
-          title: Id
-        seller_id:
-          type: string
-          format: uuid
-          title: Seller Id
-        category_id:
-          type: string
-          format: uuid
-          title: Category Id
-        title:
-          type: string
-          title: Title
-        description:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Description
-        status:
-          $ref: "#/components/schemas/ProductStatus"
-        images:
-          items:
-            $ref: "#/components/schemas/ProductImageResponse"
-          type: array
-          title: Images
-        characteristics:
-          items:
-            $ref: "#/components/schemas/ProductCharacteristicResponse"
-          type: array
-          title: Characteristics
+          items: { $ref: "#/components/schemas/CharacteristicResponse" }
         skus:
-          items:
-            $ref: "#/components/schemas/SKUShortResponse"
           type: array
-          title: Skus
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
+          items: { $ref: "#/components/schemas/SKUResponse" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    ProductPublicResponse:
       type: object
+      description: Витринная карточка (для X-Service-Key из B2C, нет cost_price/reserved_quantity)
       required:
         - id
         - seller_id
         - category_id
         - title
+        - slug
         - description
         - status
         - images
@@ -1625,475 +1351,436 @@ components:
         - skus
         - created_at
         - updated_at
-      title: ProductResponse
+      properties:
+        id: { type: string, format: uuid }
+        seller_id: { type: string, format: uuid }
+        category_id: { type: string, format: uuid }
+        title: { type: string }
+        slug: { type: string }
+        description: { type: string }
+        status: { $ref: "#/components/schemas/ProductStatus" }
+        images:
+          type: array
+          items: { $ref: "#/components/schemas/ProductImageResponse" }
+        characteristics:
+          type: array
+          items: { $ref: "#/components/schemas/CharacteristicResponse" }
+        skus:
+          type: array
+          items: { $ref: "#/components/schemas/SKUPublicResponse" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
     ProductShortResponse:
-      properties:
-        id:
-          type: string
-          format: uuid
-          title: Id
-        title:
-          type: string
-          title: Title
-        status:
-          $ref: "#/components/schemas/ProductStatus"
-        category_id:
-          type: string
-          format: uuid
-          title: Category Id
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
       type: object
-      required:
-        - id
-        - title
-        - status
-        - category_id
-        - created_at
-      title: ProductShortResponse
-    ProductStatus:
-      type: string
-      enum:
-        - CREATED
-        - ON_MODERATION
-        - MODERATED
-        - BLOCKED
-      title: ProductStatus
-    ProductUpdate:
+      required: [id, title, slug, status, category_id, deleted, created_at]
       properties:
-        category_id:
-          anyOf:
-            - type: string
-              format: uuid
-            - type: "null"
-          title: Category Id
-        title:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Title
-        description:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Description
-        status:
-          anyOf:
-            - $ref: "#/components/schemas/ProductStatus"
-            - type: "null"
+        id: { type: string, format: uuid }
+        title: { type: string }
+        slug: { type: string }
+        status: { $ref: "#/components/schemas/ProductStatus" }
+        category_id: { type: string, format: uuid }
+        deleted: { type: boolean }
+        created_at: { type: string, format: date-time }
+        min_price:
+          {
+            type: integer,
+            nullable: true,
+            description: Минимальная цена SKU в копейках,
+          }
+        cover_image: { type: string, nullable: true }
+
+    ProductPublicShortResponse:
       type: object
-      title: ProductUpdate
-    RefreshRequest:
+      required: [id, title, slug, status, category_id, created_at, min_price]
       properties:
-        refresh_token:
-          type: string
-          title: Refresh Token
+        id: { type: string, format: uuid }
+        title: { type: string }
+        slug: { type: string }
+        status: { $ref: "#/components/schemas/ProductStatus" }
+        category_id: { type: string, format: uuid }
+        min_price:
+          { type: integer, description: Минимальная цена SKU в копейках }
+        cover_image: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    ProductPaginatedResponse:
       type: object
-      required:
-        - refresh_token
-      title: RefreshRequest
-    SKUCharacteristicCreate:
+      required: [items, total_count, limit, offset]
       properties:
-        name:
-          type: string
-          title: Name
-        value:
-          type: string
-          title: Value
-      type: object
-      required:
-        - name
-        - value
-      title: SKUCharacteristicCreate
-    SKUCharacteristicResponse:
-      properties:
-        id:
-          type: string
-          format: uuid
-          title: Id
-        name:
-          type: string
-          title: Name
-        value:
-          type: string
-          title: Value
-      type: object
-      required:
-        - id
-        - name
-        - value
-      title: SKUCharacteristicResponse
-    SKUCreate:
-      properties:
-        product_id:
-          type: string
-          format: uuid
-          title: Product Id
-        name:
-          type: string
-          title: Name
-        price:
-          type: integer
-          title: Price
-        stock_quantity:
-          type: integer
-          title: Stock Quantity
-          default: 0
-        article:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Article
-        images:
-          items:
-            $ref: "#/components/schemas/SKUImageCreate"
+        items:
           type: array
-          title: Images
-          default: []
-        characteristics:
-          items:
-            $ref: "#/components/schemas/SKUCharacteristicCreate"
-          type: array
-          title: Characteristics
-          default: []
+          items: { $ref: "#/components/schemas/ProductShortResponse" }
+        total_count: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+
+    ProductPublicPaginatedResponse:
       type: object
-      required:
-        - product_id
-        - name
-        - price
-      title: SKUCreate
+      required: [items, total_count, limit, offset]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/ProductPublicShortResponse" }
+        total_count: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+
+    # ─── SKU ───
     SKUImageCreate:
-      properties:
-        url:
-          type: string
-          title: Url
-        ordering:
-          type: integer
-          title: Ordering
-          default: 0
       type: object
-      required:
-        - url
-      title: SKUImageCreate
-    SKUImageCreateRequest:
+      required: [url]
       properties:
-        url:
-          type: string
-          title: Url
-        ordering:
-          type: integer
-          title: Ordering
-          default: 0
-      type: object
-      required:
-        - url
-      title: SKUImageCreateRequest
+        url: { type: string }
+        ordering: { type: integer, default: 0 }
+
     SKUImageResponse:
-      properties:
-        id:
-          type: string
-          format: uuid
-          title: Id
-        url:
-          type: string
-          title: Url
-        ordering:
-          type: integer
-          title: Ordering
       type: object
-      required:
-        - id
-        - url
-        - ordering
-      title: SKUImageResponse
-    SKUImageUpdateRequest:
+      required: [id, url, ordering]
       properties:
-        url:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Url
-        ordering:
-          anyOf:
-            - type: integer
-            - type: "null"
-          title: Ordering
+        id: { type: string, format: uuid }
+        url: { type: string }
+        ordering: { type: integer }
+
+    SKUCreate:
       type: object
-      title: SKUImageUpdateRequest
-    SKUResponse:
+      required: [product_id, name, price]
       properties:
-        id:
-          type: string
-          format: uuid
-          title: Id
-        product_id:
-          type: string
-          format: uuid
-          title: Product Id
-        name:
-          type: string
-          title: Name
-        price:
-          type: integer
-          title: Price
-        stock_quantity:
-          type: integer
-          title: Stock Quantity
-        article:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Article
+        product_id: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 255 }
+        price: { type: integer, minimum: 0, description: Цена в копейках }
+        discount:
+          {
+            type: integer,
+            default: 0,
+            minimum: 0,
+            description: Скидка в копейках,
+          }
+        cost_price:
+          {
+            type: integer,
+            nullable: true,
+            description: Себестоимость в копейках (видна только seller'у),
+          }
+        article: { type: string, nullable: true }
         images:
-          items:
-            $ref: "#/components/schemas/SKUImageResponse"
           type: array
-          title: Images
+          items: { $ref: "#/components/schemas/SKUImageCreate" }
+          default: []
         characteristics:
-          items:
-            $ref: "#/components/schemas/SKUCharacteristicResponse"
           type: array
-          title: Characteristics
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
+          items: { $ref: "#/components/schemas/Characteristic" }
+          default: []
+
+    SKUUpdate:
       type: object
+      properties:
+        name: { type: string, nullable: true }
+        price: { type: integer, nullable: true, minimum: 0 }
+        discount: { type: integer, nullable: true, minimum: 0 }
+        cost_price: { type: integer, nullable: true }
+        article: { type: string, nullable: true }
+        characteristics:
+          type: array
+          nullable: true
+          items: { $ref: "#/components/schemas/Characteristic" }
+
+    SKUResponse:
+      type: object
+      description: Seller view — включает cost_price и reserved_quantity
       required:
         - id
         - product_id
         - name
         - price
+        - discount
+        - cost_price
         - stock_quantity
+        - active_quantity
+        - reserved_quantity
         - article
         - images
         - characteristics
         - created_at
         - updated_at
-      title: SKUResponse
-    SKUShortResponse:
       properties:
-        id:
-          type: string
-          format: uuid
-          title: Id
-        name:
-          type: string
-          title: Name
-        price:
-          type: integer
-          title: Price
-        stock_quantity:
-          type: integer
-          title: Stock Quantity
-        article:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Article
+        id: { type: string, format: uuid }
+        product_id: { type: string, format: uuid }
+        name: { type: string }
+        price: { type: integer, description: В копейках }
+        discount: { type: integer, description: В копейках }
+        cost_price:
+          {
+            type: integer,
+            nullable: true,
+            description: "В копейках, только seller-view",
+          }
+        stock_quantity: { type: integer, description: Всего на складе }
+        active_quantity:
+          { type: integer, description: Доступно к продаже (stock - reserved) }
+        reserved_quantity:
+          {
+            type: integer,
+            description: "Зарезервировано в корзинах/заказах, только seller-view",
+          }
+        article: { type: string, nullable: true }
+        images:
+          type: array
+          items: { $ref: "#/components/schemas/SKUImageResponse" }
+        characteristics:
+          type: array
+          items: { $ref: "#/components/schemas/CharacteristicResponse" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    SKUPublicResponse:
       type: object
+      description: Витринный SKU (без cost_price, reserved_quantity)
       required:
         - id
+        - product_id
         - name
         - price
+        - discount
         - stock_quantity
+        - active_quantity
         - article
-      title: SKUShortResponse
-    SKUUpdate:
+        - images
+        - characteristics
       properties:
-        name:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Name
-        price:
-          anyOf:
-            - type: integer
-            - type: "null"
-          title: Price
-        article:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Article
+        id: { type: string, format: uuid }
+        product_id: { type: string, format: uuid }
+        name: { type: string }
+        price: { type: integer }
+        discount: { type: integer }
+        stock_quantity: { type: integer }
+        active_quantity: { type: integer }
+        article: { type: string, nullable: true }
+        images:
+          type: array
+          items: { $ref: "#/components/schemas/SKUImageResponse" }
+        characteristics:
+          type: array
+          items: { $ref: "#/components/schemas/CharacteristicResponse" }
+
+    # ─── Invoices ───
+    InvoiceStatus:
+      type: string
+      enum: [CREATED, PARTIALLY_ACCEPTED, ACCEPTED, CANCELLED]
+
+    InvoiceItemCreate:
       type: object
-      title: SKUUpdate
-    SellerCreate:
+      required: [sku_id, quantity]
       properties:
-        email:
-          type: string
-          format: email
-          title: Email
-        password:
-          type: string
-          title: Password
-        first_name:
-          type: string
-          title: First Name
-        last_name:
-          type: string
-          title: Last Name
-        middle_name:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Middle Name
-        company_name:
-          type: string
-          title: Company Name
-        phone:
-          anyOf:
-            - type: string
-              format: phone
-            - type: "null"
-          title: Phone
+        sku_id: { type: string, format: uuid }
+        quantity: { type: integer, minimum: 1 }
+
+    InvoiceItemResponse:
       type: object
-      required:
-        - email
-        - password
-        - first_name
-        - last_name
-        - company_name
-      title: SellerCreate
-    SellerResponse:
+      required: [id, sku_id, quantity, accepted_quantity]
       properties:
-        id:
+        id: { type: string, format: uuid }
+        sku_id: { type: string, format: uuid }
+        quantity: { type: integer }
+        accepted_quantity:
+          { type: integer, description: Фактически принятое количество }
+
+    InvoiceCreate:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/InvoiceItemCreate" }
+
+    InvoiceAcceptRequest:
+      type: object
+      description: |
+        Тело необязательно — если пусто, накладная принимается полностью.
+        Иначе можно указать accepted_items для частичной приёмки.
+      properties:
+        accepted_items:
+          type: array
+          items:
+            type: object
+            required: [invoice_item_id, accepted_quantity]
+            properties:
+              invoice_item_id: { type: string, format: uuid }
+              accepted_quantity: { type: integer, minimum: 0 }
+
+    InvoiceResponse:
+      type: object
+      required: [id, seller_id, status, items, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        seller_id: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/InvoiceStatus" }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/InvoiceItemResponse" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        accepted_at: { type: string, format: date-time, nullable: true }
+        accepted_by:
+          {
+            type: string,
+            format: uuid,
+            nullable: true,
+            description: "Оператор-админ, принявший накладную",
+          }
+
+    InvoicePaginatedResponse:
+      type: object
+      required: [items, total_count, limit, offset]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/InvoiceResponse" }
+        total_count: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+
+    # ─── Images ───
+    ImageEntityType:
+      type: string
+      enum: [PRODUCT, SKU]
+
+    ImageUploadRequest:
+      type: object
+      required: [file, entity_type]
+      properties:
+        file:
+          type: string
+          format: binary
+        entity_type: { $ref: "#/components/schemas/ImageEntityType" }
+        entity_id:
           type: string
           format: uuid
-          title: Id
-        email:
-          type: string
-          title: Email
-        first_name:
-          type: string
-          title: First Name
-        last_name:
-          type: string
-          title: Last Name
-        middle_name:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Middle Name
-        company_name:
-          type: string
-          title: Company Name
-        phone:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Phone
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
+          nullable: true
+          description: Если null — изображение «висит» неподшитым и должно быть прикреплено через /products/{id}/images или /skus/{id}/images
+        ordering: { type: integer, default: 0 }
+
+    ImageUploadResponse:
       type: object
-      required:
-        - id
-        - email
-        - first_name
-        - last_name
-        - middle_name
-        - company_name
-        - phone
-        - created_at
-        - updated_at
-      title: SellerResponse
-    SellerUpdate:
+      required: [id, url, ordering, entity_type]
       properties:
-        first_name:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: First Name
-        last_name:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Last Name
-        middle_name:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Middle Name
-        company_name:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Company Name
-        phone:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Phone
+        id: { type: string, format: uuid }
+        url: { type: string }
+        ordering: { type: integer }
+        entity_type: { $ref: "#/components/schemas/ImageEntityType" }
+        entity_id: { type: string, format: uuid, nullable: true }
+
+    ImageAttachRequest:
       type: object
-      title: SellerUpdate
-    TokenResponse:
+      required: [url]
       properties:
-        access_token:
-          type: string
-          title: Access Token
-        refresh_token:
-          type: string
-          title: Refresh Token
-        token_type:
-          type: string
-          title: Token Type
-          default: bearer
-      type: object
-      required:
-        - access_token
-        - refresh_token
-      title: TokenResponse
-    UploadResponse:
-      properties:
+        image_id:
+          {
+            type: string,
+            format: uuid,
+            nullable: true,
+            description: Если изображение уже загружено через /images,
+          }
         url:
-          type: string
-          title: Url
+          {
+            type: string,
+            description: "Используется, если image_id не передан (внешний URL)",
+          }
+        ordering: { type: integer, default: 0 }
+
+    ImageUpdateRequest:
       type: object
-      required:
-        - url
-      title: UploadResponse
-    ValidationError:
       properties:
-        loc:
-          items:
-            anyOf:
-              - type: string
-              - type: integer
-          type: array
-          title: Location
-        msg:
-          type: string
-          title: Message
-        type:
-          type: string
-          title: Error Type
-        input:
-          title: Input
-        ctx:
-          type: object
-          title: Context
+        url: { type: string, nullable: true }
+        ordering: { type: integer, nullable: true }
+
+    # ─── Inventory ───
+    InventoryItem:
       type: object
-      required:
-        - loc
-        - msg
-        - type
-      title: ValidationError
-  securitySchemes:
-    OAuth2PasswordBearer:
-      type: oauth2
-      flows:
-        password:
-          scopes: {}
-          tokenUrl: /api/auth/login
+      required: [sku_id, quantity]
+      properties:
+        sku_id: { type: string, format: uuid }
+        quantity: { type: integer, minimum: 1 }
+
+    ReserveRequest:
+      type: object
+      required: [idempotency_key, order_id, items]
+      properties:
+        idempotency_key: { type: string, format: uuid, description: TTL 1 час }
+        order_id: { type: string, format: uuid }
+        items:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/InventoryItem" }
+
+    ReserveResponse:
+      type: object
+      required: [order_id, status, reserved_at]
+      properties:
+        order_id: { type: string, format: uuid }
+        status: { type: string, enum: [RESERVED] }
+        reserved_at: { type: string, format: date-time }
+
+    InventoryOrderRequest:
+      type: object
+      required: [order_id, items]
+      properties:
+        order_id: { type: string, format: uuid }
+        items:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/InventoryItem" }
+
+    InventoryOrderResponse:
+      type: object
+      required: [order_id, status, processed_at]
+      properties:
+        order_id: { type: string, format: uuid }
+        status: { type: string, enum: [UNRESERVED, FULFILLED] }
+        processed_at: { type: string, format: date-time }
+
+    # ─── Moderation events (приём от Moderation Service) ───
+    ModerationEventType:
+      type: string
+      enum: [MODERATED, BLOCKED]
+
+    ModerationEventRequest:
+      type: object
+      required: [idempotency_key, product_id, event_type, occurred_at]
+      properties:
+        idempotency_key: { type: string, format: uuid }
+        product_id: { type: string, format: uuid }
+        event_type: { $ref: "#/components/schemas/ModerationEventType" }
+        moderator_id: { type: string, format: uuid, nullable: true }
+        moderator_comment: { type: string, nullable: true }
+        blocking_reason_id:
+          {
+            type: string,
+            format: uuid,
+            nullable: true,
+            description: Обязательно при BLOCKED,
+          }
+        hard_block:
+          {
+            type: boolean,
+            default: false,
+            description: При true → товар уходит в HARD_BLOCKED,
+          }
+        field_reports:
+          type: array
+          nullable: true
+          items: { $ref: "#/components/schemas/FieldReport" }
+        occurred_at: { type: string, format: date-time }
+
+    FieldReport:
+      type: object
+      required: [field_name, comment]
+      properties:
+        field_name:
+          {
+            type: string,
+            description: 'например "title", "description", "images[0]"',
+          }
+        sku_id: { type: string, format: uuid, nullable: true }
+        comment: { type: string }
