@@ -1,6 +1,5 @@
+from b2c.src.api import cart, catalog, categories, favorites, home, products
 from fastapi import FastAPI
-
-from api import cart, catalog, categories, favorites, home, products
 
 app = FastAPI(title="B2C (catalog, cart, favorites, home)")
 
