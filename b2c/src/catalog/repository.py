@@ -8,6 +8,7 @@ from typing import Any, Protocol
 from uuid import UUID
 
 import httpx
+
 from b2c.src.catalog.domain import Facet, Facets, FacetValue, ProductShort, ProductShortList
 
 

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from b2c.src.catalog.domain import Facet, Facets, FacetValue
 from pydantic import BaseModel
+
+from b2c.src.catalog.domain import Facet, Facets, FacetValue
 
 
 class FacetValueResponse(BaseModel):

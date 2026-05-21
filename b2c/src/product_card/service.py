@@ -17,3 +17,7 @@ class ProductCardService:
         if product.status != ProductStatus.MODERATED:
             return None
         return product
+
+    async def get_similar_products(self, product_id: UUID, limit: int) -> list[Product]:
+        products = await self._repository.get_similar_products(product_id, limit)
+        return [product for product in products if product.status == ProductStatus.MODERATED]

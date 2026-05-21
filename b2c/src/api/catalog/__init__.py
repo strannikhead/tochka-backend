@@ -1,12 +1,16 @@
 from typing import Annotated, Any
 from uuid import UUID
 
+from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import JSONResponse
+from src.api.products.dependencies import get_product_card_service
+from src.api.products.schemas import CatalogProductDetailResponse
+from src.product_card.service import ProductCardService
+
 from b2c.src.api.catalog.dependencies import get_catalog_repository
 from b2c.src.api.catalog.filters import parse_filters
 from b2c.src.api.catalog.schemas import FacetsResponse
 from b2c.src.catalog.repository import CatalogRepository, UpstreamServiceError
-from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import JSONResponse
 
 router = APIRouter(prefix="/api/v1", tags=["catalog"])
 
@@ -61,3 +65,25 @@ async def get_similar_products(
         return JSONResponse(status_code=status_code, content={"message": str(exc)})
 
     return items
+
+
+@router.get("/catalog/products/{product_id}", response_model=CatalogProductDetailResponse)
+async def get_product_detail(
+    product_id: str,
+    service: Annotated[ProductCardService, Depends(get_product_card_service)],
+) -> CatalogProductDetailResponse | JSONResponse:
+    try:
+        parsed_id = UUID(product_id)
+    except ValueError:
+        return JSONResponse(status_code=400, content={"message": "Invalid product_id"})
+
+    try:
+        product = await service.get_product_card(parsed_id)
+    except Exception as exc:
+        # map upstream errors
+        return JSONResponse(status_code=502, content={"message": str(exc)})
+
+    if product is None:
+        return JSONResponse(status_code=404, content={"message": "Product not found"})
+
+    return CatalogProductDetailResponse.from_domain(product)

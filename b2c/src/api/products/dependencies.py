@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from typing import Annotated
 
+from fastapi import Depends
+
 from b2c.src.product_card.repository import HttpProductRepository, ProductRepository
 from b2c.src.product_card.service import ProductCardService
-from fastapi import Depends
 
 
 def get_product_repository() -> ProductRepository:
