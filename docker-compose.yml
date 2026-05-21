@@ -9,7 +9,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
       - ./scripts/init-databases.sql:/docker-entrypoint-initdb.d/init-databases.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U neomarket -d postgres"]
@@ -43,6 +43,7 @@ services:
     container_name: b2c
     environment:
       DATABASE_URL: postgresql://neomarket:neomarket_dev_2026@postgres:5432/neomarket_b2c
+      B2B_BASE_URL: http://b2b:8000
     ports:
       - "8002:8000"
     depends_on:
