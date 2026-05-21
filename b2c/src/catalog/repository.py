@@ -58,6 +58,7 @@ class CatalogProduct:
     popularity: int
     created_at: datetime
     discount: int
+    description: str | None = None
 
     def to_short(self) -> ProductShort:
         return ProductShort(
@@ -293,7 +294,10 @@ def _matches_filters(product: CatalogProduct, filters: dict[str, list[str]]) -> 
 def _matches_search(product: CatalogProduct, search: str | None) -> bool:
     if not search:
         return True
-    return search.lower() in product.title.lower()
+    needle = search.lower()
+    title = product.title.lower()
+    description = (product.description or "").lower()
+    return needle in title or needle in description
 
 
 def _sort_products(products: list[CatalogProduct], sort: str | None) -> list[CatalogProduct]:
