@@ -1,5 +1,5 @@
+from b2b.src.api import categories, invoices, products, public_catalog, skus
 from fastapi import FastAPI
-from src.api import categories, invoices, products, public_catalog, skus
 
 app = FastAPI(title="B2B Seller Cabinet")
 

@@ -52,12 +52,18 @@ async def list_products(
         if trimmed and len(trimmed) < 3:
             return JSONResponse(
                 status_code=400,
-                content={"message": "Search query must be at least 3 characters"},
+                content={
+                    "code": "INVALID_REQUEST",
+                    "message": "Search query must be at least 3 characters",
+                },
             )
-        if len(trimmed) > 255:
+        if len(trimmed) > 200:
             return JSONResponse(
                 status_code=400,
-                content={"message": "Search query is too long"},
+                content={
+                    "code": "INVALID_REQUEST",
+                    "message": "Search query must be at most 200 characters",
+                },
             )
 
     # normalize search for repository call: use trimmed string or None
