@@ -8,12 +8,13 @@ from pydantic import BaseModel
 
 
 class ImageResponse(BaseModel):
+    id: UUID
     url: str
-    order: int
+    ordering: int
 
     @classmethod
-    def from_domain(cls, image: Image) -> ImageResponse:
-        return cls(url=image.url, order=image.order)
+    def from_domain(cls, image_id: UUID, image: Image, ordering: int) -> ImageResponse:
+        return cls(id=image_id, url=image.url, ordering=ordering)
 
 
 class CharacteristicResponse(BaseModel):
@@ -81,21 +82,28 @@ class ProductResponse(BaseModel):
 
 class ProductShortResponse(BaseModel):
     id: UUID
-    title: str
-    image: str
-    price: int
-    in_stock: bool
-    is_in_cart: bool
+    name: str
+    min_price: int
+    has_stock: bool
+    images: list[ImageResponse]
 
     @classmethod
     def from_domain(cls, product: ProductShort) -> ProductShortResponse:
+        images: list[ImageResponse] = []
+        if product.image:
+            images = [
+                ImageResponse(
+                    id=product.id,
+                    url=product.image,
+                    ordering=0,
+                )
+            ]
         return cls(
             id=product.id,
-            title=product.title,
-            image=product.image,
-            price=product.price,
-            in_stock=product.in_stock,
-            is_in_cart=product.is_in_cart,
+            name=product.title,
+            min_price=product.price,
+            has_stock=product.in_stock,
+            images=images,
         )
 
 

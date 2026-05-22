@@ -26,3 +26,38 @@ async def get_category_filters(id: str) -> JSONResponse:
         raise HTTPException(status_code=404, detail="Категория не найдена")
 
     return JSONResponse(content={"category_id": str(category_id), "filters": filters})
+
+
+@router.get("")
+async def list_categories(parent_id: str | None = None, only_root: bool = False):
+    return JSONResponse(content=[])
+
+
+@router.post("")
+async def create_category() -> JSONResponse:
+    return JSONResponse(status_code=201, content={})
+
+
+@router.get("/tree")
+async def get_categories_tree():
+    return JSONResponse(content=[])
+
+
+@router.get("/{category_id}")
+async def get_category(category_id: str) -> JSONResponse:
+    return JSONResponse(content={})
+
+
+@router.patch("/{category_id}")
+async def update_category(category_id: str) -> JSONResponse:
+    return JSONResponse(content={})
+
+
+@router.delete("/{category_id}")
+async def delete_category(category_id: str):
+    return JSONResponse(status_code=204, content=None)
+
+
+@router.get("/{category_id}/breadcrumbs")
+async def get_category_breadcrumbs(category_id: str) -> JSONResponse:
+    return JSONResponse(content=[])
