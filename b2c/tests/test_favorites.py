@@ -12,12 +12,12 @@ from api.products.dependencies import get_product_repository
 from favorites.repository import InMemoryFavoriteRepository
 from main import app
 from product_card.domain import Characteristic, Image, Product, ProductStatus, Sku
-from product_card.repository import ProductRepository
 
 TEST_USER_ID = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 OTHER_USER_ID = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
 PRODUCT_ID = UUID("770e8400-e29b-41d4-a716-446655440002")
 BLOCKED_PRODUCT_ID = UUID("770e8400-e29b-41d4-a716-446655440099")
+MISSING_PRODUCT_ID = UUID("770e8400-e29b-41d4-a716-4466554400ff")
 
 
 class StubProductRepository:
@@ -27,30 +27,39 @@ class StubProductRepository:
     async def get_product(self, product_id: UUID) -> Product | None:
         return self._products.get(product_id)
 
+    async def get_similar_products(self, product_id: UUID, limit: int) -> list[Product]:
+        return []
+
 
 def _build_product(product_id: UUID, status: ProductStatus) -> Product:
-    images = (Image(url="https://example.com/img.jpg", order=1),)
-    characteristics = (Characteristic(name="BRAND", value="Test"),)
-    skus = (
-        Sku(
-            id=UUID("660e8400-e29b-41d4-a716-446655440001"),
-            name="Test SKU",
-            price=10000,
-            discount=0,
-            quantity=5,
-            characteristics=characteristics,
-            images=images,
-        ),
+    image = Image(
+        id=UUID("111e8400-e29b-41d4-a716-446655440000"),
+        url="https://example.com/img.jpg",
+        ordering=1,
+    )
+    characteristic = Characteristic(name="BRAND", value="Test")
+    sku = Sku(
+        id=UUID("660e8400-e29b-41d4-a716-446655440001"),
+        product_id=product_id,
+        name="Test SKU",
+        sku_code="TST-001",
+        price=10000,
+        discount=0,
+        stock_quantity=5,
+        active_quantity=5,
+        characteristics=(characteristic,),
+        images=(image,),
     )
     return Product(
         id=product_id,
+        name="Test Product",
         slug="test-product",
-        title="Test Product",
         description="A test product",
-        images=images,
+        images=(image,),
         status=status,
-        characteristics=characteristics,
-        skus=skus,
+        characteristics=(characteristic,),
+        skus=(sku,),
+        min_price=10000,
     )
 
 
@@ -59,10 +68,11 @@ def favorites_repo() -> InMemoryFavoriteRepository:
     return InMemoryFavoriteRepository()
 
 
-@pytest.fixture()
-def client(favorites_repo: InMemoryFavoriteRepository) -> Generator[TestClient]:
-    product = _build_product(PRODUCT_ID, ProductStatus.MODERATED)
-    stub_repo = StubProductRepository({product.id: product})
+def _make_client(
+    favorites_repo: InMemoryFavoriteRepository,
+    products: dict[UUID, Product],
+) -> Generator[TestClient]:
+    stub_repo = StubProductRepository(products)
 
     app.dependency_overrides[get_favorite_repository] = lambda: favorites_repo
     app.dependency_overrides[get_product_repository] = lambda: stub_repo
@@ -72,62 +82,70 @@ def client(favorites_repo: InMemoryFavoriteRepository) -> Generator[TestClient]:
         yield tc
 
     app.dependency_overrides = {}
+
+
+@pytest.fixture()
+def client(favorites_repo: InMemoryFavoriteRepository) -> Generator[TestClient]:
+    product = _build_product(PRODUCT_ID, ProductStatus.MODERATED)
+    yield from _make_client(favorites_repo, {product.id: product})
 
 
 @pytest.fixture()
 def client_blocked(favorites_repo: InMemoryFavoriteRepository) -> Generator[TestClient]:
     blocked = _build_product(BLOCKED_PRODUCT_ID, ProductStatus.BLOCKED)
-    stub_repo = StubProductRepository({blocked.id: blocked})
-
-    app.dependency_overrides[get_favorite_repository] = lambda: favorites_repo
-    app.dependency_overrides[get_product_repository] = lambda: stub_repo
-    app.dependency_overrides[get_current_user_id] = lambda: TEST_USER_ID
-
-    with TestClient(app) as tc:
-        yield tc
-
-    app.dependency_overrides = {}
+    yield from _make_client(favorites_repo, {blocked.id: blocked})
 
 
-def test_add_to_favorites_returns_201(client: TestClient) -> None:
-    response = client.post(f"/api/v1/favorites/{PRODUCT_ID}")
+def test_add_to_favorites_returns_204(client: TestClient) -> None:
+    response = client.put(f"/api/v1/favorites/{PRODUCT_ID}")
 
-    assert response.status_code == 201
-    payload = response.json()
-    assert payload["product_id"] == str(PRODUCT_ID)
-    assert payload["user_id"] == str(TEST_USER_ID)
-    assert "added_at" in payload
-    assert payload["message"] == "Товар добавлен в избранное"
+    assert response.status_code == 204
+    assert response.content == b""
 
 
-def test_repeat_add_returns_200_not_duplicate(client: TestClient) -> None:
-    client.post(f"/api/v1/favorites/{PRODUCT_ID}")
-    response = client.post(f"/api/v1/favorites/{PRODUCT_ID}")
+def test_repeat_add_returns_204_idempotent(client: TestClient) -> None:
+    first = client.put(f"/api/v1/favorites/{PRODUCT_ID}")
+    second = client.put(f"/api/v1/favorites/{PRODUCT_ID}")
 
-    assert response.status_code == 200
-    assert response.json()["message"] == "Товар уже находится в избранном"
+    assert first.status_code == 204
+    assert second.status_code == 204
 
-    get_response = client.get("/api/v1/favorites")
-    assert get_response.status_code == 200
-    assert get_response.json()["total"] == 1
-    assert len(get_response.json()["items"]) == 1
+    listing = client.get("/api/v1/favorites")
+    assert listing.status_code == 200
+    payload = listing.json()
+    assert payload["total_count"] == 1
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["id"] == str(PRODUCT_ID)
 
 
 def test_blocked_product_excluded_from_list(client_blocked: TestClient) -> None:
-    client_blocked.post(f"/api/v1/favorites/{BLOCKED_PRODUCT_ID}")
+    client_blocked.put(f"/api/v1/favorites/{BLOCKED_PRODUCT_ID}")
     response = client_blocked.get("/api/v1/favorites")
 
     assert response.status_code == 200
-    assert response.json()["total"] == 0
-    assert response.json()["items"] == []
+    payload = response.json()
+    assert payload["total_count"] == 0
+    assert payload["items"] == []
 
 
 def test_user_id_from_query_is_ignored(client: TestClient) -> None:
-    client.post(f"/api/v1/favorites/{PRODUCT_ID}")
+    client.put(f"/api/v1/favorites/{PRODUCT_ID}")
 
     # user_id в query должен игнорироваться — берётся из JWT (переопределённый в тесте)
     response = client.get(f"/api/v1/favorites?user_id={OTHER_USER_ID}")
 
     assert response.status_code == 200
     # JWT-пользователь (TEST_USER_ID) имеет 1 избранный товар; OTHER_USER_ID — 0
-    assert response.json()["total"] == 1
+    assert response.json()["total_count"] == 1
+
+
+def test_add_nonexistent_product_returns_404(client: TestClient) -> None:
+    response = client.put(f"/api/v1/favorites/{MISSING_PRODUCT_ID}")
+
+    assert response.status_code == 404
+
+
+def test_delete_nonexistent_is_idempotent(client: TestClient) -> None:
+    response = client.delete(f"/api/v1/favorites/{MISSING_PRODUCT_ID}")
+
+    assert response.status_code == 204

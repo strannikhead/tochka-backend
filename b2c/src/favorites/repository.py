@@ -64,7 +64,8 @@ class DbFavoriteRepository:
         result = await self._session.execute(stmt)
         await self._session.flush()
 
-        if result.rowcount > 0:
+        # CursorResult.rowcount: 1 при вставке, 0 при конфликте on_conflict_do_nothing
+        if result.rowcount > 0:  # type: ignore[attr-defined]
             return FavoriteEntry(user_id=user_id, product_id=product_id, added_at=now), True
 
         # Конфликт — запись уже есть, возвращаем существующую
