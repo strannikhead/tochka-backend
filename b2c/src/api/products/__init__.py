@@ -116,11 +116,15 @@ async def get_product(
     return CatalogProductDetailResponse.from_domain(product)
 
 
-@router.get("/{product_id}/similar", response_model=list[CatalogProductCardResponse])
+@router.get(
+    "/{product_id}/similar",
+    response_model=list[CatalogProductCardResponse],
+    include_in_schema=False,
+)
 async def get_similar_products(
     product_id: str,
     service: Annotated[ProductCardService, Depends(get_product_card_service)],
-    limit: int = 10,
+    limit: int = Query(10, ge=1, le=50),
 ) -> list[CatalogProductCardResponse]:
     try:
         parsed_id = UUID(product_id)
