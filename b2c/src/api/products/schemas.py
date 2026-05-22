@@ -9,15 +9,6 @@ from b2c.src.catalog.domain import ProductShort, ProductShortList
 from b2c.src.product_card.domain import Characteristic, Image, Product, Sku
 
 
-class ImageResponse(BaseModel):
-    url: str
-    ordering: int
-
-    @classmethod
-    def from_domain(cls, image: Image) -> ImageResponse:
-        return cls(url=image.url, ordering=image.ordering)
-
-
 class ImageRefResponse(BaseModel):
     id: UUID
     url: str
