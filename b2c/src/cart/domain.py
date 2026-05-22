@@ -26,6 +26,7 @@ class B2BSkuData:
     image_url: str | None
     product_title: str
     product_status: str  # MODERATED, BLOCKED, CREATED, ON_MODERATION
+    sku_code: str | None = None
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,7 @@ class CartItemEnriched:
     product_id: uuid.UUID
     product_title: str
     sku_name: str
+    sku_code: str | None
     image_url: str | None
     unit_price: int
     quantity: int
@@ -55,13 +57,14 @@ def enrich_item(stored: CartItemStored, sku_data: B2BSkuData | None) -> CartItem
             product_id=_NIL_UUID,
             product_title="",
             sku_name="",
+            sku_code=None,
             image_url=None,
             unit_price=0,
             quantity=stored.quantity,
             available_stock=0,
             line_total=0,
             available=False,
-            unavailable_reason="PRODUCT_DELISTED",
+            unavailable_reason="PRODUCT_DELETED",
         )
 
     unavailable_reason: str | None = None
@@ -85,6 +88,7 @@ def enrich_item(stored: CartItemStored, sku_data: B2BSkuData | None) -> CartItem
         product_id=sku_data.product_id,
         product_title=sku_data.product_title,
         sku_name=sku_data.sku_name,
+        sku_code=sku_data.sku_code,
         image_url=sku_data.image_url,
         unit_price=sku_data.price,
         quantity=stored.quantity,

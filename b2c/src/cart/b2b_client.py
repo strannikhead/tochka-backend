@@ -53,9 +53,9 @@ class HttpB2BCartClient:
         timeout: float = 5.0,
         service_key: str | None = None,
     ) -> None:
-        self._base_url = (
-            base_url or os.getenv("B2B_BASE_URL") or "http://localhost:8001"
-        ).rstrip("/")
+        self._base_url = (base_url or os.getenv("B2B_BASE_URL") or "http://localhost:8001").rstrip(
+            "/"
+        )
         self._timeout = timeout
         self._service_key = service_key or os.getenv("B2B_SERVICE_KEY")
 
@@ -108,6 +108,7 @@ class HttpB2BCartClient:
             image_url=image_url,
             product_title=product_payload["title"],
             product_status=product_payload["status"],
+            sku_code=sku_payload.get("sku_code"),
         )
 
     async def check_sku_for_add(

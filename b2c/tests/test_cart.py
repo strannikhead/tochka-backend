@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi.testclient import TestClient
 from src.api.cart.dependencies import get_b2b_cart_client, get_cart_repository
+from src.api.dependencies import get_optional_user_id
 from src.cart.b2b_client import InMemoryB2BCartClient
 from src.cart.domain import B2BSkuData, CartItemStored
 from src.cart.repository import InMemoryCartRepository
@@ -16,7 +17,7 @@ PRODUCT_ID_2 = uuid4()
 SKU_ID_1 = uuid4()
 SKU_ID_2 = uuid4()
 SKU_ID_UNAVAILABLE = uuid4()
-SESSION_ID = "sess-test-abc123"
+SESSION_ID = uuid4()
 
 
 def make_sku(
@@ -28,6 +29,7 @@ def make_sku(
     stock: int = 5,
     product_status: str = "MODERATED",
     product_title: str = "Test Product",
+    sku_code: str | None = "TST-001",
 ) -> B2BSkuData:
     return B2BSkuData(
         sku_id=sku_id,
@@ -38,12 +40,19 @@ def make_sku(
         image_url="/s3/test.jpg",
         product_title=product_title,
         product_status=product_status,
+        sku_code=sku_code,
     )
 
 
-def setup_overrides(repo: InMemoryCartRepository, b2b: InMemoryB2BCartClient) -> None:
+def setup_overrides(
+    repo: InMemoryCartRepository,
+    b2b: InMemoryB2BCartClient,
+    *,
+    user_id: UUID | None = None,
+) -> None:
     app.dependency_overrides[get_cart_repository] = lambda: repo
     app.dependency_overrides[get_b2b_cart_client] = lambda: b2b
+    app.dependency_overrides[get_optional_user_id] = lambda: user_id
 
 
 @pytest.fixture(autouse=True)
@@ -53,31 +62,35 @@ def clear_overrides():
 
 
 def test__add_sku_increments_quantity_if_already_in_cart() -> None:
-    user_id = str(uuid4())
+    user_id = uuid4()
     repo = InMemoryCartRepository()
     b2b = InMemoryB2BCartClient(skus={SKU_ID_1: make_sku(SKU_ID_1, PRODUCT_ID_1, stock=20)})
-    setup_overrides(repo, b2b)
+    setup_overrides(repo, b2b, user_id=user_id)
 
     with TestClient(app) as client:
         r1 = client.post(
             "/api/v1/cart/items",
             json={"sku_id": str(SKU_ID_1), "quantity": 2},
-            headers={"X-User-Id": user_id},
         )
-        assert r1.status_code == 201
-        assert r1.json()["item"]["quantity"] == 2
+        assert r1.status_code == 200
+        data1 = r1.json()
+        assert len(data1["items"]) == 1
+        assert data1["items"][0]["quantity"] == 2
+        assert data1["items_count"] == 2
 
         r2 = client.post(
             "/api/v1/cart/items",
             json={"sku_id": str(SKU_ID_1), "quantity": 3},
-            headers={"X-User-Id": user_id},
         )
         assert r2.status_code == 200
-        assert r2.json()["item"]["quantity"] == 5
+        data2 = r2.json()
+        assert len(data2["items"]) == 1
+        assert data2["items"][0]["quantity"] == 5
+        assert data2["items_count"] == 5
 
 
 def test__get_cart_enriched_with_b2b_data() -> None:
-    user_id = str(uuid4())
+    user_id = uuid4()
     repo = InMemoryCartRepository()
     b2b = InMemoryB2BCartClient(
         skus={
@@ -91,44 +104,42 @@ def test__get_cart_enriched_with_b2b_data() -> None:
             )
         }
     )
-    setup_overrides(repo, b2b)
+    setup_overrides(repo, b2b, user_id=user_id)
 
     with TestClient(app) as client:
         client.post(
             "/api/v1/cart/items",
             json={"sku_id": str(SKU_ID_1), "quantity": 1},
-            headers={"X-User-Id": user_id},
         )
 
-        r = client.get("/api/v1/cart", headers={"X-User-Id": user_id})
+        r = client.get("/api/v1/cart")
         assert r.status_code == 200
         data = r.json()
         assert len(data["items"]) == 1
         item = data["items"][0]
-        assert item["product_title"] == "iPhone 15"
-        assert item["sku_name"] == "256GB Black"
+        assert item["name"] == "iPhone 15 256GB Black"
         assert item["unit_price"] == 12999000
-        assert item["available"] is True
-        assert data["summary"]["total_amount"] == 12999000
+        assert item["line_total"] == 12999000
+        assert item["available_quantity"] == 5
+        assert item["is_available"] is True
+        assert data["items_count"] == 1
+        assert data["subtotal"] == 12999000
+        assert data["is_valid"] is True
 
 
 def test__unavailable_sku_shown_with_reason() -> None:
-    user_id_uuid = uuid4()
-    user_id_str = str(user_id_uuid)
+    user_id = uuid4()
     repo = InMemoryCartRepository()
     b2b = InMemoryB2BCartClient(
-        skus={
-            SKU_ID_UNAVAILABLE: make_sku(SKU_ID_UNAVAILABLE, PRODUCT_ID_2, stock=0),
-        }
+        skus={SKU_ID_UNAVAILABLE: make_sku(SKU_ID_UNAVAILABLE, PRODUCT_ID_2, stock=0)},
     )
-    setup_overrides(repo, b2b)
+    setup_overrides(repo, b2b, user_id=user_id)
 
-    # Insert unavailable item directly into repo, bypassing B2B pre-check
     item_id = uuid4()
     now = datetime.now(UTC)
     repo._items[item_id] = CartItemStored(
         id=item_id,
-        user_id=user_id_uuid,
+        user_id=user_id,
         session_id=None,
         sku_id=SKU_ID_UNAVAILABLE,
         quantity=1,
@@ -137,23 +148,31 @@ def test__unavailable_sku_shown_with_reason() -> None:
     )
 
     with TestClient(app) as client:
-        r = client.get("/api/v1/cart", headers={"X-User-Id": user_id_str})
+        r = client.get("/api/v1/cart")
         assert r.status_code == 200
-        items = r.json()["items"]
+        data = r.json()
+        items = data["items"]
         assert len(items) == 1
         item = items[0]
-        assert item["available"] is False
-        assert item["unavailable_reason"] == "OUT_OF_STOCK"
+        assert item["is_available"] is False
+        assert item["available_quantity"] == 0
         assert item["line_total"] == 0
-        assert r.json()["summary"]["total_amount"] == 0
-        assert r.json()["summary"]["has_unavailable_items"] is True
+        assert data["subtotal"] == 0
+        assert data["is_valid"] is False
+
+        validate_r = client.post("/api/v1/cart/validate")
+        assert validate_r.status_code == 200
+        validate_data = validate_r.json()
+        assert validate_data["is_valid"] is False
+        assert len(validate_data["issues"]) == 1
+        issue = validate_data["issues"][0]
+        assert issue["sku_id"] == str(SKU_ID_UNAVAILABLE)
+        assert issue["type"] == "OUT_OF_STOCK"
 
 
 def test__guest_cart_merged_on_login() -> None:
     """Merge при конфликте берёт MAX(guest, auth)."""
-    user_uuid = uuid4()
-    user_id_str = str(user_uuid)
-
+    user_id = uuid4()
     repo = InMemoryCartRepository()
     b2b = InMemoryB2BCartClient(
         skus={
@@ -161,48 +180,44 @@ def test__guest_cart_merged_on_login() -> None:
             SKU_ID_2: make_sku(SKU_ID_2, PRODUCT_ID_2, stock=20),
         }
     )
-    setup_overrides(repo, b2b)
+    setup_overrides(repo, b2b, user_id=None)
 
     with TestClient(app) as client:
-        # Guest adds SKU_1 (qty=5) and SKU_2 (qty=1)
+        # Guest adds SKU_1 (qty=5) and SKU_2 (qty=1) via X-Session-Id
         client.post(
             "/api/v1/cart/items",
             json={"sku_id": str(SKU_ID_1), "quantity": 5},
-            headers={"X-Session-Id": SESSION_ID},
+            headers={"X-Session-Id": str(SESSION_ID)},
         )
         client.post(
             "/api/v1/cart/items",
             json={"sku_id": str(SKU_ID_2), "quantity": 1},
-            headers={"X-Session-Id": SESSION_ID},
+            headers={"X-Session-Id": str(SESSION_ID)},
         )
 
-        # Authorized user already has SKU_1 (qty=2) — less than guest
+        # Authorized user already has SKU_1 (qty=2)
+        app.dependency_overrides[get_optional_user_id] = lambda: user_id
         client.post(
             "/api/v1/cart/items",
             json={"sku_id": str(SKU_ID_1), "quantity": 2},
-            headers={"X-User-Id": user_id_str},
         )
 
-        # Merge after login
+        # Merge after login: JWT user + X-Session-Id header
         merge_r = client.post(
             "/api/v1/cart/merge",
-            json={"session_id": SESSION_ID},
-            headers={"X-User-Id": user_id_str},
+            headers={"X-Session-Id": str(SESSION_ID)},
         )
         assert merge_r.status_code == 200
-
-        # Check merged user cart
-        r = client.get("/api/v1/cart", headers={"X-User-Id": user_id_str})
-        assert r.status_code == 200
-        items = r.json()["items"]
-        quantities = {item["sku_id"]: item["quantity"] for item in items}
+        merged = merge_r.json()
+        quantities = {item["sku_id"]: item["quantity"] for item in merged["items"]}
 
         # Conflict: MAX(guest=5, auth=2) = 5
         assert quantities[str(SKU_ID_1)] == 5
-        # Transferred from guest (no conflict in user cart)
+        # Transferred from guest (no conflict)
         assert quantities[str(SKU_ID_2)] == 1
 
         # Guest cart should be empty
-        r_guest = client.get("/api/v1/cart", headers={"X-Session-Id": SESSION_ID})
+        app.dependency_overrides[get_optional_user_id] = lambda: None
+        r_guest = client.get("/api/v1/cart", headers={"X-Session-Id": str(SESSION_ID)})
         assert r_guest.status_code == 200
         assert r_guest.json()["items"] == []

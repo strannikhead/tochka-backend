@@ -51,17 +51,26 @@ class CartRepository(Protocol):
         quantity: int,
     ) -> CartItemStored | None: ...
 
+    async def set_item_quantity_by_sku(
+        self,
+        *,
+        sku_id: uuid.UUID,
+        user_id: uuid.UUID | None,
+        session_id: str | None,
+        quantity: int,
+    ) -> CartItemStored | None: ...
+
     async def delete_item(
         self, *, item_id: uuid.UUID, user_id: uuid.UUID | None, session_id: str | None
     ) -> bool: ...
 
-    async def clear(
-        self, *, user_id: uuid.UUID | None, session_id: str | None
-    ) -> None: ...
+    async def delete_item_by_sku(
+        self, *, sku_id: uuid.UUID, user_id: uuid.UUID | None, session_id: str | None
+    ) -> bool: ...
 
-    async def merge_guest_into_user(
-        self, *, session_id: str, user_id: uuid.UUID
-    ) -> None: ...
+    async def clear(self, *, user_id: uuid.UUID | None, session_id: str | None) -> None: ...
+
+    async def merge_guest_into_user(self, *, session_id: str, user_id: uuid.UUID) -> None: ...
 
 
 class InMemoryCartRepository:
@@ -153,6 +162,28 @@ class InMemoryCartRepository:
         self._items[updated.id] = updated
         return updated
 
+    async def set_item_quantity_by_sku(
+        self,
+        *,
+        sku_id: uuid.UUID,
+        user_id: uuid.UUID | None,
+        session_id: str | None,
+        quantity: int,
+    ) -> CartItemStored | None:
+        item = next(
+            (
+                i
+                for i in self._items.values()
+                if self._matches(i, user_id, session_id) and i.sku_id == sku_id
+            ),
+            None,
+        )
+        if item is None:
+            return None
+        return await self.set_item_quantity(
+            item_id=item.id, user_id=user_id, session_id=session_id, quantity=quantity
+        )
+
     async def delete_item(
         self, *, item_id: uuid.UUID, user_id: uuid.UUID | None, session_id: str | None
     ) -> bool:
@@ -162,9 +193,23 @@ class InMemoryCartRepository:
         del self._items[item_id]
         return True
 
-    async def clear(
-        self, *, user_id: uuid.UUID | None, session_id: str | None
-    ) -> None:
+    async def delete_item_by_sku(
+        self, *, sku_id: uuid.UUID, user_id: uuid.UUID | None, session_id: str | None
+    ) -> bool:
+        item = next(
+            (
+                i
+                for i in self._items.values()
+                if self._matches(i, user_id, session_id) and i.sku_id == sku_id
+            ),
+            None,
+        )
+        if item is None:
+            return False
+        del self._items[item.id]
+        return True
+
+    async def clear(self, *, user_id: uuid.UUID | None, session_id: str | None) -> None:
         to_delete = [
             item_id
             for item_id, item in self._items.items()
@@ -173,12 +218,8 @@ class InMemoryCartRepository:
         for item_id in to_delete:
             del self._items[item_id]
 
-    async def merge_guest_into_user(
-        self, *, session_id: str, user_id: uuid.UUID
-    ) -> None:
-        guest_items = [
-            item for item in self._items.values() if item.session_id == session_id
-        ]
+    async def merge_guest_into_user(self, *, session_id: str, user_id: uuid.UUID) -> None:
+        guest_items = [item for item in self._items.values() if item.session_id == session_id]
         now = datetime.now(UTC)
         for guest_item in guest_items:
             user_item = next(
@@ -213,9 +254,7 @@ class InMemoryCartRepository:
                 self._items[transferred.id] = transferred
 
         to_delete = [
-            item_id
-            for item_id, item in self._items.items()
-            if item.session_id == session_id
+            item_id for item_id, item in self._items.items() if item.session_id == session_id
         ]
         for item_id in to_delete:
             del self._items[item_id]
@@ -317,6 +356,30 @@ class DbCartRepository:
         await self._session.commit()
         return _to_domain(item)
 
+    async def set_item_quantity_by_sku(
+        self,
+        *,
+        sku_id: uuid.UUID,
+        user_id: uuid.UUID | None,
+        session_id: str | None,
+        quantity: int,
+    ) -> CartItemStored | None:
+        from src.models import CartItem
+
+        result = await self._session.execute(
+            select(CartItem).where(
+                self._owner_clause(user_id, session_id),
+                CartItem.sku_id == sku_id,
+            )
+        )
+        item = result.scalar_one_or_none()
+        if item is None:
+            return None
+        item.quantity = quantity
+        item.updated_at = datetime.now(UTC)
+        await self._session.commit()
+        return _to_domain(item)
+
     async def delete_item(
         self, *, item_id: uuid.UUID, user_id: uuid.UUID | None, session_id: str | None
     ) -> bool:
@@ -335,19 +398,31 @@ class DbCartRepository:
         await self._session.commit()
         return True
 
-    async def clear(
-        self, *, user_id: uuid.UUID | None, session_id: str | None
-    ) -> None:
+    async def delete_item_by_sku(
+        self, *, sku_id: uuid.UUID, user_id: uuid.UUID | None, session_id: str | None
+    ) -> bool:
         from src.models import CartItem
 
-        await self._session.execute(
-            delete(CartItem).where(self._owner_clause(user_id, session_id))
+        result = await self._session.execute(
+            select(CartItem).where(
+                self._owner_clause(user_id, session_id),
+                CartItem.sku_id == sku_id,
+            )
         )
+        item = result.scalar_one_or_none()
+        if item is None:
+            return False
+        await self._session.delete(item)
+        await self._session.commit()
+        return True
+
+    async def clear(self, *, user_id: uuid.UUID | None, session_id: str | None) -> None:
+        from src.models import CartItem
+
+        await self._session.execute(delete(CartItem).where(self._owner_clause(user_id, session_id)))
         await self._session.commit()
 
-    async def merge_guest_into_user(
-        self, *, session_id: str, user_id: uuid.UUID
-    ) -> None:
+    async def merge_guest_into_user(self, *, session_id: str, user_id: uuid.UUID) -> None:
         from src.models import CartItem
 
         guest_result = await self._session.execute(

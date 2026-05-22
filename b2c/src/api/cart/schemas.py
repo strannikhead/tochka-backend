@@ -1,80 +1,105 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from src.cart.domain import CartItemEnriched
 
 
+class ImageRefSchema(BaseModel):
+    id: uuid.UUID
+    url: str
+    alt: str | None = None
+    ordering: int = 0
+    is_main: bool | None = None
+
+
 class CartItemSchema(BaseModel):
-    item_id: uuid.UUID
+    model_config = ConfigDict(populate_by_name=True)
+
     sku_id: uuid.UUID
     product_id: uuid.UUID
-    product_title: str
-    sku_name: str
-    image_url: str | None
-    unit_price: int
+    name: str
+    sku_code: str | None = None
     quantity: int
-    available_stock: int
+    unit_price: int
+    unit_price_at_add: int | None = None
     line_total: int
-    available: bool
-    unavailable_reason: str | None
+    available_quantity: int = Field(ge=0)
+    is_available: bool
+    image: ImageRefSchema | None = None
 
     @classmethod
     def from_domain(cls, item: CartItemEnriched) -> CartItemSchema:
+        name = " ".join(part for part in (item.product_title, item.sku_name) if part)
         return cls(
-            item_id=item.item_id,
             sku_id=item.sku_id,
             product_id=item.product_id,
-            product_title=item.product_title,
-            sku_name=item.sku_name,
-            image_url=item.image_url,
-            unit_price=item.unit_price,
+            name=name,
+            sku_code=item.sku_code,
             quantity=item.quantity,
-            available_stock=item.available_stock,
+            unit_price=item.unit_price,
+            unit_price_at_add=None,
             line_total=item.line_total,
-            available=item.available,
-            unavailable_reason=item.unavailable_reason,
+            available_quantity=item.available_stock,
+            is_available=item.available,
+            image=None,
         )
 
 
-class CartSummarySchema(BaseModel):
-    total_amount: int
-    total_items: int
-    total_quantity: int
-    available_items: int
-    has_unavailable_items: bool
-    checkout_ready: bool
-    currency: str = "RUB"
-
-
-class CheckoutItemSchema(BaseModel):
-    product_id: uuid.UUID
-    sku_id: uuid.UUID
-    quantity: int
-    unit_price: int
-    line_total: int
-
-
-class CheckoutPayloadSchema(BaseModel):
-    items: list[CheckoutItemSchema]
-    total_amount: int
-    currency: str = "RUB"
-
-
 class CartResponseSchema(BaseModel):
+    id: uuid.UUID | None = None
     items: list[CartItemSchema]
-    summary: CartSummarySchema
-    checkout_payload: CheckoutPayloadSchema
+    items_count: int
+    subtotal: int
+    is_valid: bool
+    updated_at: datetime | None = None
+
+    @classmethod
+    def from_enriched(
+        cls,
+        items: list[CartItemEnriched],
+        *,
+        cart_id: uuid.UUID | None = None,
+        updated_at: datetime | None = None,
+    ) -> CartResponseSchema:
+        subtotal = sum(item.line_total for item in items)
+        items_count = sum(item.quantity for item in items)
+        is_valid = bool(items) and all(
+            item.available and item.quantity <= item.available_stock for item in items
+        )
+        if not items:
+            is_valid = True
+        return cls(
+            id=cart_id,
+            items=[CartItemSchema.from_domain(item) for item in items],
+            items_count=items_count,
+            subtotal=subtotal,
+            is_valid=is_valid,
+            updated_at=updated_at,
+        )
 
 
-class CartMutationResponseSchema(BaseModel):
+# enum from OpenAPI: PRICE_CHANGED, OUT_OF_STOCK, QUANTITY_REDUCED, PRODUCT_BLOCKED, PRODUCT_DELETED
+CartIssueType = str
+
+
+class CartValidationIssueSchema(BaseModel):
+    sku_id: uuid.UUID
+    type: CartIssueType
     message: str
-    item: CartItemSchema
-    summary: CartSummarySchema
+    old_value: int | str | None = None
+    new_value: int | str | None = None
 
 
-class AddCartItemRequest(BaseModel):
+class CartValidationResponseSchema(BaseModel):
+    is_valid: bool
+    cart: CartResponseSchema
+    issues: list[CartValidationIssueSchema]
+
+
+class CartItemAddRequest(BaseModel):
     sku_id: uuid.UUID
     quantity: int = 1
 
@@ -86,7 +111,7 @@ class AddCartItemRequest(BaseModel):
         return v
 
 
-class UpdateCartItemRequest(BaseModel):
+class CartItemQuantityRequest(BaseModel):
     quantity: int
 
     @field_validator("quantity")
@@ -95,37 +120,3 @@ class UpdateCartItemRequest(BaseModel):
         if v < 1:
             raise ValueError("quantity must be >= 1")
         return v
-
-
-class MergeCartRequest(BaseModel):
-    session_id: str
-
-
-def build_summary(items: list[CartItemEnriched]) -> CartSummarySchema:
-    available = [item for item in items if item.available]
-    return CartSummarySchema(
-        total_amount=sum(item.line_total for item in available),
-        total_items=len(items),
-        total_quantity=sum(item.quantity for item in items),
-        available_items=len(available),
-        has_unavailable_items=len(items) > len(available),
-        checkout_ready=bool(available) and len(available) == len(items),
-    )
-
-
-def build_checkout_payload(items: list[CartItemEnriched]) -> CheckoutPayloadSchema:
-    available = [item for item in items if item.available]
-    checkout_items = [
-        CheckoutItemSchema(
-            product_id=item.product_id,
-            sku_id=item.sku_id,
-            quantity=item.quantity,
-            unit_price=item.unit_price,
-            line_total=item.line_total,
-        )
-        for item in available
-    ]
-    return CheckoutPayloadSchema(
-        items=checkout_items,
-        total_amount=sum(item.line_total for item in available),
-    )
