@@ -5,10 +5,12 @@ on:
     branches:
       - main
       - master
+      - main-for-pr
   pull_request:
     branches:
       - main
       - master
+      - main-for-pr
   workflow_dispatch:
 
 concurrency:
