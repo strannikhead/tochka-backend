@@ -1,18 +1,15 @@
 from typing import Annotated
 from uuid import UUID
 
-from b2c.src.api.catalog.dependencies import get_catalog_repository
-from b2c.src.api.catalog.filters import parse_filters
-from b2c.src.api.products.dependencies import get_product_card_service
-from b2c.src.api.products.schemas import ProductResponse, ProductShortListResponse
-from b2c.src.catalog.repository import CatalogRepository, UpstreamServiceError
-from b2c.src.product_card.repository import UpstreamServiceError as ProductUpstreamServiceError
-from b2c.src.product_card.service import ProductCardService
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 
-router = APIRouter(prefix="/api/v1/products", tags=["products"])
+from b2c.src.api.catalog.dependencies import get_catalog_repository
+from b2c.src.api.catalog.filters import parse_filters
+from b2c.src.api.products.schemas import ProductShortListResponse
+from b2c.src.catalog.repository import CatalogRepository, UpstreamServiceError
 
+router = APIRouter(prefix="/api/v1/products", tags=["catalog"])
 ALLOWED_SORTS = (
     "rating",
     "popularity",
@@ -89,39 +86,3 @@ async def list_products(
         return JSONResponse(status_code=status_code, content={"message": str(exc)})
 
     return ProductShortListResponse.from_domain(product_list)
-
-
-@router.get("/{id}", response_model=ProductResponse)
-async def get_product(
-    id: str,
-    service: Annotated[ProductCardService, Depends(get_product_card_service)],
-) -> ProductResponse:
-    try:
-        product_id = UUID(id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Некорректный id товара") from exc
-
-    try:
-        product = await service.get_product_card(product_id)
-    except ProductUpstreamServiceError as exc:
-        status_code = 502 if exc.status_code is None else exc.status_code
-        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
-    if product is None:
-        raise HTTPException(status_code=404, detail="Товар не найден")
-
-    return ProductResponse.from_domain(product)
-
-
-@router.get("/{id}/similar")
-async def get_similar_products(id: str) -> dict[str, str]:
-    return {"endpoint": "get_similar_products"}
-
-
-@router.get("/{product_id}/skus")
-async def list_product_skus(product_id: str) -> dict[str, str]:
-    return {"endpoint": "list_product_skus"}
-
-
-@router.get("/{product_id}/skus/{sku_id}")
-async def get_product_sku(product_id: str, sku_id: str) -> dict[str, str]:
-    return {"endpoint": "get_product_sku"}
