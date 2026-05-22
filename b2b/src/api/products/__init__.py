@@ -9,6 +9,14 @@ from b2b.src.products.application.service import ProductsService
 from b2b.src.products.dependencies import get_products_service
 from b2b.src.products.domain.errors import CategoryNotFoundError
 from b2b.src.products.domain.models import ProductListResponse
+from b2b.src.public_catalog.application.service import PublicCatalogService
+from b2b.src.public_catalog.dependencies import get_public_catalog_service
+from b2b.src.public_catalog.domain.errors import (
+    CategoryNotFoundError as PublicCategoryNotFoundError,
+)
+from b2b.src.public_catalog.domain.errors import (
+    ProductNotFoundError,
+)
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
@@ -269,18 +277,30 @@ async def get_public_product(
 @public_router.get("/products/{product_id}/similar")
 async def get_public_similar_products(
     product_id: str,
+    service: Annotated[PublicCatalogService, Depends(get_public_catalog_service)],
+    limit: int = Query(10, ge=1, le=50),
     x_service_key: str | None = Header(None, alias="X-Service-Key"),
 ) -> JSONResponse:
     _require_service_key(x_service_key)
     try:
-        UUID(product_id)
+        product_uuid = UUID(product_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Некорректный id товара") from exc
 
-    if product_id == "770e8400-e29b-41d4-a716-446655440099":
-        raise HTTPException(status_code=404, detail="Товар не найден")
+    try:
+        items = await service.get_similar(product_uuid, limit=limit)
+    except ProductNotFoundError:
+        return JSONResponse(
+            status_code=404,
+            content={"code": "NOT_FOUND", "message": "Product not found"},
+        )
+    except PublicCategoryNotFoundError:
+        return JSONResponse(
+            status_code=400,
+            content={"code": "INVALID_REQUEST", "message": "Nonexistent category id"},
+        )
 
-    return JSONResponse(content=[_build_product_short_payload(product_id)])
+    return JSONResponse(content=items)
 
 
 @public_router.get("/skus/{sku_id}")
