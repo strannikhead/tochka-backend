@@ -7,10 +7,6 @@ on:
       - master
       - main-for-pr
   pull_request:
-    branches:
-      - main
-      - master
-      - main-for-pr
   workflow_dispatch:
 
 concurrency:
@@ -39,10 +35,12 @@ jobs:
         id: set-matrix
         run: |
           SERVICES=()
-          if [[ "${{ github.event_name }}" == "push" && ("${{ github.ref }}" == "refs/heads/main" || "${{ github.ref }}" == "refs/heads/master") ]]; then
+
+          if [[ "${{ github.event_name }}" == "push" ]]; then
             SERVICES=("b2b" "b2c" "moderation" "shared")
           else
-            BASE_SHA="${{ github.event.pull_request.base.sha || 'origin/main' }}"
+            BASE_SHA="${{ github.event.pull_request.base.sha || github.event.before }}"
+
             git diff --name-only $BASE_SHA...HEAD > /tmp/changed_files.txt 2>/dev/null || git diff --name-only HEAD~1...HEAD > /tmp/changed_files.txt 2>/dev/null || echo "" > /tmp/changed_files.txt
 
             for s in b2b b2c moderation shared; do
@@ -56,7 +54,6 @@ jobs:
             echo "services=[]" >> $GITHUB_OUTPUT
           else
             JSON_ARRAY="[$(IFS=,; echo "${SERVICES[*]}" | sed 's/\"\"/\",\"/g')]"
-            # Ensure proper JSON formatting for strings if not already quoted
             if [[ ! $JSON_ARRAY =~ \" ]]; then
                JSON_ARRAY=$(echo $JSON_ARRAY | sed 's/\([^][,]\+\)/"\1"/g')
             fi
