@@ -4,7 +4,7 @@ import enum
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -84,10 +84,18 @@ class CartItem(Base):
 
     __tablename__ = "cart_items"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
+    __table_args__ = (
+        CheckConstraint(
+            "user_id IS NOT NULL OR session_id IS NOT NULL",
+            name="cart_identity_check",
+        ),
     )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, index=True
+    )
+    session_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     sku_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     added_at: Mapped[datetime] = mapped_column(
@@ -101,7 +109,7 @@ class CartItem(Base):
     )
 
     # Relationships
-    user: Mapped[User] = relationship("User", back_populates="cart_items")
+    user: Mapped[User | None] = relationship("User", back_populates="cart_items")
 
 
 class Address(Base):
