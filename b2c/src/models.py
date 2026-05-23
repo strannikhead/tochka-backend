@@ -4,7 +4,17 @@ import enum
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -65,6 +75,7 @@ class Favorite(Base):
     """Favorite products model."""
 
     __tablename__ = "favorites"
+    __table_args__ = (UniqueConstraint("user_id", "product_id", name="uq_favorites_user_product"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
