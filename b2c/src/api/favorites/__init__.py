@@ -8,7 +8,7 @@ async def list_favorites() -> dict[str, str]:
     return {"endpoint": "list_favorites"}
 
 
-@router.post("/{product_id}")
+@router.put("/{product_id}")
 async def add_to_favorites(product_id: str) -> dict[str, str]:
     return {"endpoint": "add_to_favorites"}
 
