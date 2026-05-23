@@ -8,9 +8,8 @@ from uuid import UUID
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from favorites.domain import FavoriteEntry
-from models import Favorite as FavoriteRow
+from src.favorites.domain import FavoriteEntry
+from src.models import Favorite as FavoriteRow
 
 
 class FavoriteRepository(Protocol):
@@ -62,7 +61,7 @@ class DbFavoriteRepository:
             .on_conflict_do_nothing(constraint="uq_favorites_user_product")
         )
         result = await self._session.execute(stmt)
-        await self._session.flush()
+        await self._session.commit()
 
         # CursorResult.rowcount: 1 при вставке, 0 при конфликте on_conflict_do_nothing
         if result.rowcount > 0:  # type: ignore[attr-defined]
@@ -91,4 +90,4 @@ class DbFavoriteRepository:
                 FavoriteRow.product_id == product_id,
             )
         )
-        await self._session.flush()
+        await self._session.commit()

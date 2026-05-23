@@ -3,9 +3,9 @@ from __future__ import annotations
 import asyncio
 from uuid import UUID
 
-from favorites.repository import FavoriteRepository
-from product_card.domain import Product, ProductStatus
-from product_card.repository import ProductRepository, UpstreamServiceError
+from src.favorites.repository import FavoriteRepository
+from src.product_card.domain import Product, ProductStatus
+from src.product_card.repository import ProductRepository, UpstreamServiceError
 
 
 class ProductNotFoundError(Exception):

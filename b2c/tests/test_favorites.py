@@ -5,13 +5,12 @@ from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
-
-from api.dependencies import get_current_user_id
-from api.favorites.dependencies import get_favorite_repository
-from api.products.dependencies import get_product_repository
-from favorites.repository import InMemoryFavoriteRepository
-from main import app
-from product_card.domain import Characteristic, Image, Product, ProductStatus, Sku
+from src.api.dependencies import get_current_user_id
+from src.api.favorites.dependencies import get_favorite_repository
+from src.api.products.dependencies import get_product_repository
+from src.favorites.repository import InMemoryFavoriteRepository
+from src.main import app
+from src.product_card.domain import Characteristic, Image, Product, ProductStatus, Sku
 
 TEST_USER_ID = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 OTHER_USER_ID = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")

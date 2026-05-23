@@ -4,12 +4,11 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-
-from api.dependencies import get_current_user_id
-from api.favorites.dependencies import get_favorites_service
-from api.products.schemas import CatalogProductCardResponse, PaginatedCatalogProductsResponse
-from favorites.service import FavoritesService, ProductNotFoundError
-from product_card.repository import UpstreamServiceError
+from src.api.dependencies import get_current_user_id
+from src.api.favorites.dependencies import get_favorites_service
+from src.api.products.schemas import CatalogProductCardResponse, PaginatedCatalogProductsResponse
+from src.favorites.service import FavoritesService, ProductNotFoundError
+from src.product_card.repository import UpstreamServiceError
 
 router = APIRouter(prefix="/api/v1/favorites", tags=["favorites"])
 
