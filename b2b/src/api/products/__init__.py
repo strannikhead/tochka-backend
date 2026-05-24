@@ -3,14 +3,20 @@ from __future__ import annotations
 import os
 from datetime import UTC, datetime
 from typing import Annotated
-from uuid import UUID
+from uuid import UUID, uuid4
 
+from b2b.src.auth import get_current_seller_id
 from b2b.src.db import get_session
 from b2b.src.models import SKU, Product, ProductStatus
 from b2b.src.products.application.service import ProductsService
 from b2b.src.products.dependencies import get_products_service
 from b2b.src.products.domain.errors import CategoryNotFoundError
-from b2b.src.products.domain.models import ProductListResponse
+from b2b.src.products.domain.models import (
+    CharacteristicInput,
+    CreateProductCommand,
+    ProductImageInput,
+    ProductListResponse,
+)
 from b2b.src.public_catalog.application.service import PublicCatalogService
 from b2b.src.public_catalog.dependencies import get_public_catalog_service
 from b2b.src.public_catalog.domain.errors import (
@@ -21,6 +27,7 @@ from b2b.src.public_catalog.domain.errors import (
 )
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -174,9 +181,88 @@ def _to_response(product_list: ProductListResponse) -> dict[str, object]:
     }
 
 
-@router.post("")
-async def create_product() -> dict[str, str]:
-    return {"endpoint": "create_product"}
+class ProductImagePayload(BaseModel):
+    url: str
+    ordering: int = 0
+
+
+class CharacteristicPayload(BaseModel):
+    name: str
+    value: str
+
+
+class ProductCreateRequest(BaseModel):
+    # `extra="ignore"` drops any stray `seller_id` sent in the body: seller identity
+    # comes only from the JWT (IDOR guard), never from client input.
+    model_config = ConfigDict(extra="ignore")
+
+    title: str = Field(min_length=1, max_length=255)
+    description: str = Field(min_length=1, max_length=5000)
+    category_id: UUID
+    slug: str | None = None
+    images: list[ProductImagePayload] = Field(default_factory=list)
+    characteristics: list[CharacteristicPayload] = Field(default_factory=list)
+
+
+def _serialize_created_product(product: Product) -> dict[str, object]:
+    return {
+        "id": str(product.id),
+        "seller_id": str(product.seller_id),
+        "category_id": str(product.category_id),
+        "title": product.title,
+        "slug": product.slug,
+        "description": product.description,
+        "status": product.status.value,
+        "deleted": False,
+        "blocking_reason_id": None,
+        "moderator_comment": None,
+        "images": [
+            {"id": str(uuid4()), "url": image["url"], "ordering": image.get("ordering", 0)}
+            for image in (product.images or [])
+        ],
+        "characteristics": [
+            {"id": str(uuid4()), "name": char["name"], "value": char["value"]}
+            for char in (product.characteristics or [])
+        ],
+        "skus": [],
+        "created_at": product.created_at.isoformat(),
+        "updated_at": product.updated_at.isoformat(),
+    }
+
+
+@router.post("", status_code=201)
+async def create_product(
+    body: ProductCreateRequest,
+    seller_id: Annotated[UUID, Depends(get_current_seller_id)],
+    service: Annotated[ProductsService, Depends(get_products_service)],
+) -> JSONResponse:
+    command = CreateProductCommand(
+        seller_id=seller_id,
+        title=body.title,
+        description=body.description,
+        category_id=body.category_id,
+        slug=body.slug,
+        images=tuple(
+            ProductImageInput(url=image.url, ordering=image.ordering) for image in body.images
+        ),
+        characteristics=tuple(
+            CharacteristicInput(name=char.name, value=char.value)
+            for char in body.characteristics
+        ),
+    )
+    try:
+        product = await service.create_product(command)
+    except CategoryNotFoundError:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "code": "VALIDATION_ERROR",
+                "message": "Категория не найдена",
+                "details": {"field": "category_id"},
+            },
+        )
+
+    return JSONResponse(status_code=201, content=_serialize_created_product(product))
 
 
 @router.get("/{product_id}/skus")
