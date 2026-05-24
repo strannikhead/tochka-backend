@@ -1,22 +1,22 @@
-from datetime import datetime
+from __future__ import annotations
+
 from enum import StrEnum
-from typing import Any
-from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
-class NotifyOn(StrEnum):
-    IN_STOCK = "IN_STOCK"
-    PRICE_DOWN = "PRICE_DOWN"
+class SubscriptionEvent(StrEnum):
+    BACK_IN_STOCK = "BACK_IN_STOCK"
+    PRICE_DROP = "PRICE_DROP"
+
+
+DEFAULT_SUBSCRIPTION_EVENTS = [
+    SubscriptionEvent.BACK_IN_STOCK,
+    SubscriptionEvent.PRICE_DROP,
+]
 
 
 class SubscribeRequest(BaseModel):
-    notify_on: list[str] | None = None
-
-
-class SubscriptionResponse(BaseModel):
-    id: UUID
-    product: dict[str, Any]
-    notify_on: list[NotifyOn]
-    created_at: datetime
+    events: list[SubscriptionEvent] = Field(
+        default_factory=lambda: DEFAULT_SUBSCRIPTION_EVENTS.copy(),
+    )

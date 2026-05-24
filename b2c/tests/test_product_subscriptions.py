@@ -7,9 +7,9 @@ from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from src.api.dependencies import get_current_user_id
 from src.api.favorites.dependencies import (
     ProductNotFoundError,
-    get_current_user_id,
     get_favorites_repository,
     get_product_client,
 )
@@ -25,7 +25,7 @@ class SubscriptionRecord:
     id: UUID
     user_id: UUID
     product_id: UUID
-    notify_on: list[str]
+    events: list[str]
     created_at: datetime
 
 
@@ -46,16 +46,17 @@ class InMemoryFavoritesRepository:
         *,
         user_id: UUID,
         product_id: UUID,
-        notify_on: list[str],
+        events: list[str],
     ) -> SubscriptionRecord:
         subscription = SubscriptionRecord(
             id=uuid4(),
             user_id=user_id,
             product_id=product_id,
-            notify_on=notify_on,
+            events=events,
             created_at=datetime.now(UTC),
         )
         self._subscriptions[(user_id, product_id)] = subscription
+
         return subscription
 
     async def delete_product_subscription(
@@ -83,8 +84,10 @@ class StubProductClient:
 @pytest.fixture()
 def client() -> Generator[TestClient]:
     app.dependency_overrides = {}
+
     with TestClient(app) as test_client:
         yield test_client
+
     app.dependency_overrides = {}
 
 
@@ -118,65 +121,58 @@ def override_dependencies(
     app.dependency_overrides[get_current_user_id] = lambda: user_id
 
 
-def test__subscribe_returns_201_with_notify_on(client: TestClient) -> None:
+def test__subscribe_returns_204_and_stores_events(client: TestClient) -> None:
     repository = InMemoryFavoritesRepository()
     override_dependencies(repository=repository)
 
     response = client.post(
         f"/api/v1/favorites/{PRODUCT_ID}/subscribe",
-        json={"notify_on": ["IN_STOCK", "PRICE_DOWN"]},
+        json={"events": ["BACK_IN_STOCK", "PRICE_DROP"]},
     )
 
-    assert response.status_code == 201
-
-    payload = response.json()
-    assert payload["product"]["id"] == str(PRODUCT_ID)
-    assert payload["notify_on"] == ["IN_STOCK", "PRICE_DOWN"]
+    assert response.status_code == 204
+    assert response.content == b""
 
     subscription = repository._subscriptions[(USER_ID, PRODUCT_ID)]
-    assert subscription.notify_on == ["IN_STOCK", "PRICE_DOWN"]
+    assert subscription.events == ["BACK_IN_STOCK", "PRICE_DROP"]
 
 
-def test__duplicate_subscription_returns_409(client: TestClient) -> None:
+def test__subscribe_without_body_returns_204_and_stores_default_events(
+    client: TestClient,
+) -> None:
+    repository = InMemoryFavoritesRepository()
+    override_dependencies(repository=repository)
+
+    response = client.post(f"/api/v1/favorites/{PRODUCT_ID}/subscribe")
+
+    assert response.status_code == 204
+    assert response.content == b""
+
+    subscription = repository._subscriptions[(USER_ID, PRODUCT_ID)]
+    assert subscription.events == ["BACK_IN_STOCK", "PRICE_DROP"]
+
+
+def test__duplicate_subscription_returns_204_and_keeps_existing_events(
+    client: TestClient,
+) -> None:
     repository = InMemoryFavoritesRepository()
     override_dependencies(repository=repository)
 
     first_response = client.post(
         f"/api/v1/favorites/{PRODUCT_ID}/subscribe",
-        json={"notify_on": ["IN_STOCK"]},
+        json={"events": ["BACK_IN_STOCK"]},
     )
 
     second_response = client.post(
         f"/api/v1/favorites/{PRODUCT_ID}/subscribe",
-        json={"notify_on": ["IN_STOCK"]},
+        json={"events": ["PRICE_DROP"]},
     )
 
-    assert first_response.status_code == 201
-    assert second_response.status_code == 409
-    assert second_response.json()["code"] == "SUBSCRIPTION_ALREADY_EXISTS"
+    assert first_response.status_code == 204
+    assert second_response.status_code == 204
 
-
-@pytest.mark.parametrize(
-    "body",
-    [
-        {"notify_on": []},
-        {"notify_on": ["UNKNOWN_EVENT"]},
-        {"notify_on": ["IN_STOCK", "IN_STOCK"]},
-        {},
-    ],
-)
-def test__invalid_notify_on_returns_400(client: TestClient, body: dict) -> None:
-    repository = InMemoryFavoritesRepository()
-    override_dependencies(repository=repository)
-
-    response = client.post(
-        f"/api/v1/favorites/{PRODUCT_ID}/subscribe",
-        json=body,
-    )
-
-    assert response.status_code == 400
-    assert response.json()["code"] == "INVALID_NOTIFY_ON"
-    assert repository._subscriptions == {}
+    subscription = repository._subscriptions[(USER_ID, PRODUCT_ID)]
+    assert subscription.events == ["BACK_IN_STOCK"]
 
 
 def test__subscribe_to_unknown_product_returns_404(client: TestClient) -> None:
@@ -186,11 +182,35 @@ def test__subscribe_to_unknown_product_returns_404(client: TestClient) -> None:
 
     response = client.post(
         f"/api/v1/favorites/{UNKNOWN_PRODUCT_ID}/subscribe",
-        json={"notify_on": ["IN_STOCK"]},
+        json={"events": ["BACK_IN_STOCK"]},
     )
 
     assert response.status_code == 404
     assert response.json()["code"] == "PRODUCT_NOT_FOUND"
+    assert repository._subscriptions == {}
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"events": ["UNKNOWN_EVENT"]},
+        {"events": ["IN_STOCK"]},
+        {"events": ["PRICE_DOWN"]},
+    ],
+)
+def test__subscribe_with_invalid_event_returns_422(
+    client: TestClient,
+    body: dict,
+) -> None:
+    repository = InMemoryFavoritesRepository()
+    override_dependencies(repository=repository)
+
+    response = client.post(
+        f"/api/v1/favorites/{PRODUCT_ID}/subscribe",
+        json=body,
+    )
+
+    assert response.status_code == 422
     assert repository._subscriptions == {}
 
 
@@ -200,12 +220,12 @@ def test__unsubscribe_returns_204_and_removes_subscription(client: TestClient) -
 
     create_response = client.post(
         f"/api/v1/favorites/{PRODUCT_ID}/subscribe",
-        json={"notify_on": ["IN_STOCK"]},
+        json={"events": ["BACK_IN_STOCK"]},
     )
 
     delete_response = client.delete(f"/api/v1/favorites/{PRODUCT_ID}/subscribe")
 
-    assert create_response.status_code == 201
+    assert create_response.status_code == 204
     assert delete_response.status_code == 204
     assert repository._subscriptions == {}
 

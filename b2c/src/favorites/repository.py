@@ -8,19 +8,41 @@ from uuid import UUID
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
-from src.favorites.domain import FavoriteEntry
+from src.favorites.domain import FavoriteEntry, ProductSubscriptionEntry
 from src.models import Favorite as FavoriteRow
+from src.models import ProductSubscription as ProductSubscriptionRow
 
 
 class FavoriteRepository(Protocol):
     async def get_user_favorites(self, user_id: UUID) -> list[FavoriteEntry]: ...
     async def add_favorite(self, user_id: UUID, product_id: UUID) -> tuple[FavoriteEntry, bool]: ...
     async def remove_favorite(self, user_id: UUID, product_id: UUID) -> None: ...
+    async def get_product_subscription(
+        self,
+        *,
+        user_id: UUID,
+        product_id: UUID,
+    ) -> ProductSubscriptionEntry | None: ...
+    async def create_product_subscription(
+        self,
+        *,
+        user_id: UUID,
+        product_id: UUID,
+        events: list[str],
+    ) -> ProductSubscriptionEntry: ...
+
+    async def delete_product_subscription(
+        self,
+        *,
+        user_id: UUID,
+        product_id: UUID,
+    ) -> None: ...
 
 
 class InMemoryFavoriteRepository:
     def __init__(self) -> None:
         self._data: dict[tuple[UUID, UUID], FavoriteEntry] = {}
+        self._subscriptions: dict[tuple[UUID, UUID], ProductSubscriptionEntry] = {}
 
     async def get_user_favorites(self, user_id: UUID) -> list[FavoriteEntry]:
         entries = [e for e in self._data.values() if e.user_id == user_id]
@@ -36,6 +58,41 @@ class InMemoryFavoriteRepository:
 
     async def remove_favorite(self, user_id: UUID, product_id: UUID) -> None:
         self._data.pop((user_id, product_id), None)
+
+    async def get_product_subscription(
+        self,
+        *,
+        user_id: UUID,
+        product_id: UUID,
+    ) -> ProductSubscriptionEntry | None:
+        return self._subscriptions.get((user_id, product_id))
+
+    async def create_product_subscription(
+        self,
+        *,
+        user_id: UUID,
+        product_id: UUID,
+        events: list[str],
+    ) -> ProductSubscriptionEntry:
+        subscription = ProductSubscriptionEntry(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            product_id=product_id,
+            events=events,
+            created_at=datetime.now(UTC),
+        )
+
+        self._subscriptions[(user_id, product_id)] = subscription
+
+        return subscription
+
+    async def delete_product_subscription(
+        self,
+        *,
+        user_id: UUID,
+        product_id: UUID,
+    ) -> None:
+        self._subscriptions.pop((user_id, product_id), None)
 
 
 class DbFavoriteRepository:
@@ -88,6 +145,75 @@ class DbFavoriteRepository:
             delete(FavoriteRow).where(
                 FavoriteRow.user_id == user_id,
                 FavoriteRow.product_id == product_id,
+            )
+        )
+        await self._session.commit()
+
+    async def get_product_subscription(
+        self,
+        *,
+        user_id: UUID,
+        product_id: UUID,
+    ) -> ProductSubscriptionEntry | None:
+        result = await self._session.execute(
+            select(ProductSubscriptionRow).where(
+                ProductSubscriptionRow.user_id == user_id,
+                ProductSubscriptionRow.product_id == product_id,
+            )
+        )
+
+        row = result.scalar_one_or_none()
+
+        if row is None:
+            return None
+
+        return ProductSubscriptionEntry(
+            id=row.id,
+            user_id=row.user_id,
+            product_id=row.product_id,
+            events=list(row.events),
+            created_at=row.created_at,
+        )
+
+    async def create_product_subscription(
+        self,
+        *,
+        user_id: UUID,
+        product_id: UUID,
+        events: list[str],
+    ) -> ProductSubscriptionEntry:
+        now = datetime.now(UTC)
+
+        subscription = ProductSubscriptionRow(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            product_id=product_id,
+            events=events,
+            created_at=now,
+        )
+
+        self._session.add(subscription)
+        await self._session.commit()
+        await self._session.refresh(subscription)
+
+        return ProductSubscriptionEntry(
+            id=subscription.id,
+            user_id=subscription.user_id,
+            product_id=subscription.product_id,
+            events=list(subscription.events),
+            created_at=subscription.created_at,
+        )
+
+    async def delete_product_subscription(
+        self,
+        *,
+        user_id: UUID,
+        product_id: UUID,
+    ) -> None:
+        await self._session.execute(
+            delete(ProductSubscriptionRow).where(
+                ProductSubscriptionRow.user_id == user_id,
+                ProductSubscriptionRow.product_id == product_id,
             )
         )
         await self._session.commit()

@@ -99,8 +99,12 @@ class ProductSubscription(Base):
     """Product notification subscription model."""
 
     __tablename__ = "product_subscriptions"
-    __table_args__ = tuple(
-        UniqueConstraint("user_id", "product_id", name="uq_product_subscription_user_product")
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "product_id",
+            name="uq_product_subscription_user_product",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -111,13 +115,12 @@ class ProductSubscription(Base):
 
     product_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
 
-    notify_on: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False)
+    events: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
 
-    # Relationships
     user: Mapped[User] = relationship("User", back_populates="product_subscriptions")
 
 
