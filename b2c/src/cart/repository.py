@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.cart.domain import CartItemStored
 
@@ -19,6 +19,7 @@ def _to_domain(row: CartItemModel) -> CartItemStored:
         session_id=row.session_id,
         sku_id=row.sku_id,
         quantity=row.quantity,
+        unavailable_reason=row.unavailable_reason,
         added_at=row.added_at,
         updated_at=row.updated_at,
     )
@@ -72,6 +73,10 @@ class CartRepository(Protocol):
 
     async def merge_guest_into_user(self, *, session_id: str, user_id: uuid.UUID) -> None: ...
 
+    async def mark_items_unavailable_by_sku_ids(
+        self, *, sku_ids: list[uuid.UUID], unavailable_reason: str | None
+    ) -> int: ...
+
 
 class InMemoryCartRepository:
     def __init__(self, items: dict[uuid.UUID, CartItemStored] | None = None) -> None:
@@ -121,6 +126,7 @@ class InMemoryCartRepository:
                 session_id=existing.session_id,
                 sku_id=existing.sku_id,
                 quantity=existing.quantity + quantity,
+                unavailable_reason=existing.unavailable_reason,
                 added_at=existing.added_at,
                 updated_at=now,
             )
@@ -133,6 +139,7 @@ class InMemoryCartRepository:
             session_id=session_id,
             sku_id=sku_id,
             quantity=quantity,
+            unavailable_reason=None,
             added_at=now,
             updated_at=now,
         )
@@ -156,6 +163,7 @@ class InMemoryCartRepository:
             session_id=item.session_id,
             sku_id=item.sku_id,
             quantity=quantity,
+            unavailable_reason=item.unavailable_reason,
             added_at=item.added_at,
             updated_at=datetime.now(UTC),
         )
@@ -237,6 +245,8 @@ class InMemoryCartRepository:
                     session_id=None,
                     sku_id=user_item.sku_id,
                     quantity=max(user_item.quantity, guest_item.quantity),
+                    unavailable_reason=user_item.unavailable_reason
+                    or guest_item.unavailable_reason,
                     added_at=user_item.added_at,
                     updated_at=now,
                 )
@@ -248,6 +258,7 @@ class InMemoryCartRepository:
                     session_id=None,
                     sku_id=guest_item.sku_id,
                     quantity=guest_item.quantity,
+                    unavailable_reason=guest_item.unavailable_reason,
                     added_at=guest_item.added_at,
                     updated_at=now,
                 )
@@ -258,6 +269,33 @@ class InMemoryCartRepository:
         ]
         for item_id in to_delete:
             del self._items[item_id]
+
+    async def mark_items_unavailable_by_sku_ids(
+        self, *, sku_ids: list[uuid.UUID], unavailable_reason: str | None
+    ) -> int:
+        if not sku_ids:
+            return 0
+
+        sku_id_set = set(sku_ids)
+        now = datetime.now(UTC)
+        updated_count = 0
+        for item in list(self._items.values()):
+            if item.sku_id not in sku_id_set:
+                continue
+            if item.unavailable_reason == unavailable_reason:
+                continue
+            self._items[item.id] = CartItemStored(
+                id=item.id,
+                user_id=item.user_id,
+                session_id=item.session_id,
+                sku_id=item.sku_id,
+                quantity=item.quantity,
+                unavailable_reason=unavailable_reason,
+                added_at=item.added_at,
+                updated_at=now,
+            )
+            updated_count += 1
+        return updated_count
 
 
 class DbCartRepository:
@@ -397,6 +435,32 @@ class DbCartRepository:
         await self._session.delete(item)
         await self._session.commit()
         return True
+
+    async def mark_items_unavailable_by_sku_ids(
+        self, *, sku_ids: list[uuid.UUID], unavailable_reason: str | None
+    ) -> int:
+        from src.models import CartItem
+
+        if not sku_ids:
+            return 0
+
+        now = datetime.now(UTC)
+        condition = CartItem.sku_id.in_(sku_ids)
+        if unavailable_reason is None:
+            condition = condition & CartItem.unavailable_reason.is_not(None)
+        else:
+            condition = condition & or_(
+                CartItem.unavailable_reason.is_(None),
+                CartItem.unavailable_reason != unavailable_reason,
+            )
+
+        result = await self._session.execute(
+            update(CartItem)
+            .where(condition)
+            .values(unavailable_reason=unavailable_reason, updated_at=now)
+        )
+        await self._session.commit()
+        return int(result.rowcount or 0)
 
     async def delete_item_by_sku(
         self, *, sku_id: uuid.UUID, user_id: uuid.UUID | None, session_id: str | None

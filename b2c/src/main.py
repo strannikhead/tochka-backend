@@ -1,7 +1,17 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from src.api import cart, catalog, categories, collections, favorites, home, orders, products
+from src.api import (
+    cart,
+    catalog,
+    categories,
+    collections,
+    events,
+    favorites,
+    home,
+    orders,
+    products,
+)
 
 app = FastAPI(title="B2C (catalog, cart, favorites, home)")
 
@@ -18,6 +28,7 @@ app.include_router(categories.router)
 app.include_router(catalog.router)
 app.include_router(collections.router)
 app.include_router(cart.router)
+app.include_router(events.router)
 app.include_router(orders.router)
 app.include_router(favorites.router)
 app.include_router(home.router)
