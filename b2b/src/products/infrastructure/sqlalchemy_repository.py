@@ -11,6 +11,7 @@ from b2b.src.products.domain.models import (
 )
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 
 class SqlAlchemyProductsRepository:
@@ -39,6 +40,14 @@ class SqlAlchemyProductsRepository:
         await self._session.commit()
         await self._session.refresh(product)
         return product
+
+    async def get_product(self, product_id: UUID) -> Product | None:
+        stmt = (
+            select(Product)
+            .where(Product.id == product_id)
+            .options(selectinload(Product.skus))
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none()
 
     async def list_products(
         self,

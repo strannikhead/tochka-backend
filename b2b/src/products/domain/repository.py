@@ -14,6 +14,8 @@ class ProductsRepository(Protocol):
 
     async def create_product(self, command: CreateProductCommand) -> Product: ...
 
+    async def get_product(self, product_id: UUID) -> Product | None: ...
+
     async def list_products(
         self,
         *,

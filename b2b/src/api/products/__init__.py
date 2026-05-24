@@ -5,12 +5,12 @@ from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID, uuid4
 
-from b2b.src.auth import get_current_seller_id
+from b2b.src.auth import get_current_seller_id, get_optional_seller_id
 from b2b.src.db import get_session
 from b2b.src.models import SKU, Product, ProductStatus
 from b2b.src.products.application.service import ProductsService
 from b2b.src.products.dependencies import get_products_service
-from b2b.src.products.domain.errors import CategoryNotFoundError
+from b2b.src.products.domain.errors import CategoryNotFoundError, ProductNotFoundError
 from b2b.src.products.domain.models import (
     CharacteristicInput,
     CreateProductCommand,
@@ -23,7 +23,7 @@ from b2b.src.public_catalog.domain.errors import (
     CategoryNotFoundError as PublicCategoryNotFoundError,
 )
 from b2b.src.public_catalog.domain.errors import (
-    ProductNotFoundError,
+    ProductNotFoundError as PublicProductNotFoundError,
 )
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -210,7 +210,9 @@ def _serialize_created_product(product: Product) -> dict[str, object]:
         "seller_id": str(product.seller_id),
         "category_id": str(product.category_id),
         "title": product.title,
-        "slug": product.slug,
+        # *Response schemas require slug as a non-null string; fall back to the id
+        # for products created without an explicit slug.
+        "slug": product.slug if product.slug is not None else str(product.id),
         "description": product.description,
         "status": product.status.value,
         "deleted": False,
@@ -375,17 +377,136 @@ def _product_to_checkout_payload(product: Product) -> dict[str, object]:
     }
 
 
+def _normalize_images(raw: list | None) -> list[dict[str, object]]:
+    # ProductImageResponse / SKUImageResponse require id, url, ordering. Images are
+    # stored as JSON without ids, so backfill an id when absent to keep responses valid.
+    return [
+        {
+            "id": str(image.get("id") or uuid4()),
+            "url": image.get("url", ""),
+            "ordering": image.get("ordering", 0),
+        }
+        for image in (raw or [])
+    ]
+
+
+def _normalize_characteristics(raw: list | None) -> list[dict[str, object]]:
+    # CharacteristicResponse requires id, name, value.
+    return [
+        {
+            "id": str(char.get("id") or uuid4()),
+            "name": char.get("name", ""),
+            "value": char.get("value", ""),
+        }
+        for char in (raw or [])
+    ]
+
+
+def _serialize_sku_common(sku: SKU) -> dict[str, object]:
+    return {
+        "id": str(sku.id),
+        "product_id": str(sku.product_id),
+        "name": sku.name,
+        "price": sku.price,
+        "discount": sku.discount,
+        "stock_quantity": sku.stock_quantity,
+        "active_quantity": sku.active_quantity,
+        "article": sku.article,
+        "images": _normalize_images(sku.images),
+        "characteristics": _normalize_characteristics(sku.characteristics),
+    }
+
+
+def _serialize_sku_seller(sku: SKU) -> dict[str, object]:
+    # Seller view adds the sensitive economics: cost_price and reserved_quantity.
+    payload = _serialize_sku_common(sku)
+    payload["cost_price"] = sku.cost_price
+    payload["reserved_quantity"] = sku.reserved_quantity
+    payload["created_at"] = sku.created_at.isoformat()
+    payload["updated_at"] = sku.updated_at.isoformat()
+    return payload
+
+
+def _serialize_product_seller(product: Product) -> dict[str, object]:
+    return {
+        "id": str(product.id),
+        "seller_id": str(product.seller_id),
+        "category_id": str(product.category_id),
+        "title": product.title,
+        # *Response schemas require slug as a non-null string; fall back to the id
+        # for products created without an explicit slug.
+        "slug": product.slug if product.slug is not None else str(product.id),
+        "description": product.description,
+        "status": product.status.value,
+        "deleted": product.status == ProductStatus.DELETED,
+        "blocking_reason_id": (
+            str(product.blocking_reason_id) if product.blocking_reason_id else None
+        ),
+        "moderator_comment": product.moderator_comment,
+        "images": _normalize_images(product.images),
+        "characteristics": _normalize_characteristics(product.characteristics),
+        "skus": [_serialize_sku_seller(sku) for sku in product.skus],
+        "created_at": product.created_at.isoformat(),
+        "updated_at": product.updated_at.isoformat(),
+    }
+
+
+def _serialize_product_public(product: Product) -> dict[str, object]:
+    # Storefront projection (X-Service-Key): no cost_price / reserved_quantity, no
+    # blocking metadata.
+    return {
+        "id": str(product.id),
+        "seller_id": str(product.seller_id),
+        "category_id": str(product.category_id),
+        "title": product.title,
+        # *Response schemas require slug as a non-null string; fall back to the id
+        # for products created without an explicit slug.
+        "slug": product.slug if product.slug is not None else str(product.id),
+        "description": product.description,
+        "status": product.status.value,
+        "images": _normalize_images(product.images),
+        "characteristics": _normalize_characteristics(product.characteristics),
+        "skus": [_serialize_sku_common(sku) for sku in product.skus],
+        "created_at": product.created_at.isoformat(),
+        "updated_at": product.updated_at.isoformat(),
+    }
+
+
 @router.get("/{product_id}")
-async def get_product(product_id: str):
+async def get_product(
+    product_id: str,
+    service: Annotated[ProductsService, Depends(get_products_service)],
+    seller_id: Annotated[UUID | None, Depends(get_optional_seller_id)],
+    x_service_key: str | None = Header(None, alias="X-Service-Key"),
+) -> JSONResponse:
     try:
         parsed = UUID(product_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Некорректный id товара") from exc
+    except ValueError:
+        # Unknown id shape — treated as "not found", never as a 400, so we don't leak
+        # whether an id is well-formed-but-absent vs. malformed.
+        return JSONResponse(status_code=404, content=detail_not_found())
 
-    if str(parsed) == "770e8400-e29b-41d4-a716-446655440099":
-        raise HTTPException(status_code=404, detail="Товар не найден")
+    # Inter-service read takes precedence: X-Service-Key -> public projection.
+    if x_service_key is not None:
+        _require_service_key(x_service_key)
+        try:
+            product = await service.get_product_for_service(parsed)
+        except ProductNotFoundError:
+            return JSONResponse(status_code=404, content=detail_not_found())
+        return JSONResponse(content=_serialize_product_public(product))
 
-    return JSONResponse(content=_build_product_payload(str(parsed), include_sensitive=True))
+    # Otherwise this is a seller request and a valid JWT is required.
+    if seller_id is None:
+        raise HTTPException(status_code=401, detail="Требуется авторизация")
+    try:
+        product = await service.get_product_for_seller(parsed, seller_id)
+    except ProductNotFoundError:
+        return JSONResponse(status_code=404, content=detail_not_found())
+    return JSONResponse(content=_serialize_product_seller(product))
+
+
+def detail_not_found() -> dict[str, str]:
+    return {"code": "NOT_FOUND", "message": "Товар не найден"}
 
 
 @router.patch("/{product_id}")
@@ -446,7 +567,7 @@ async def get_public_similar_products(
 
     try:
         items = await service.get_similar(product_uuid, limit=limit)
-    except ProductNotFoundError:
+    except PublicProductNotFoundError:
         return JSONResponse(
             status_code=404,
             content={"code": "NOT_FOUND", "message": "Product not found"},
