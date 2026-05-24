@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from src.api.dependencies import get_current_user_id
 from src.api.orders.dependencies import get_checkout_service, get_orders_repository
 from src.api.orders.schemas import (
+    CancelOrderRequest,
     CheckoutOrderCreateRequest,
     CheckoutOrderResponse,
     OrderListItemResponse,
@@ -19,6 +20,7 @@ from src.api.orders.schemas import (
 from src.orders.repository import SqlAlchemyOrdersRepository
 from src.orders.service import (
     B2BUnavailableError,
+    CancelNotAllowedError,
     CheckoutService,
     InvalidQuantityError,
     InvalidRequestError,
@@ -75,6 +77,35 @@ async def get_order(
     user_id: CurrentUserId,
 ) -> JSONResponse:
     order = await repository.get_for_user(order_id=order_id, user_id=user_id)
+    if order is None:
+        return JSONResponse(
+            status_code=404,
+            content={"code": "ORDER_NOT_FOUND", "message": "Заказ не найден"},
+        )
+
+    payload = CheckoutOrderResponse.from_domain(order).model_dump(mode="json")
+    return JSONResponse(status_code=200, content=payload)
+
+
+@router.post("/{order_id}/cancel")
+async def cancel_order(
+    order_id: UUID,
+    service: Annotated[CheckoutService, Depends(get_checkout_service)],
+    user_id: CurrentUserId,
+    payload: CancelOrderRequest | None = None,
+) -> JSONResponse:
+    try:
+        order = await service.cancel_order(user_id=user_id, order_id=order_id)
+    except CancelNotAllowedError as exc:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "code": exc.code,
+                "message": str(exc),
+                "current_status": exc.current_status,
+            },
+        )
+
     if order is None:
         return JSONResponse(
             status_code=404,

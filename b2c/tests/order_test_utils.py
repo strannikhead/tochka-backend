@@ -40,14 +40,14 @@ class LiveCheckoutCatalogClient:
         wanted = {UUID(str(sku_id)) for sku_id in sku_ids}
         return [sku for sku in skus if sku.sku_id in wanted]
 
-    async def reserve(self, *, idempotency_key, items):
+    async def reserve(self, *, order_id, idempotency_key, items):
         transport = httpx.ASGITransport(app=b2b_app)
         async with httpx.AsyncClient(transport=transport, base_url="http://b2b") as client:
             response = await client.post(
                 "/api/v1/inventory/reserve",
                 json={
                     "idempotency_key": str(idempotency_key),
-                    "order_id": str(idempotency_key),
+                    "order_id": str(order_id),
                     "items": [
                         {"sku_id": str(item.sku_id), "quantity": item.quantity} for item in items
                     ],
@@ -71,6 +71,22 @@ class LiveCheckoutCatalogClient:
                     for item in payload.get("failed_items", [])
                 ),
             )
+        response.raise_for_status()
+
+    async def unreserve(self, *, order_id, items):
+        transport = httpx.ASGITransport(app=b2b_app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://b2b") as client:
+            response = await client.post(
+                "/api/v1/inventory/unreserve",
+                json={
+                    "order_id": str(order_id),
+                    "items": [
+                        {"sku_id": str(item.sku_id), "quantity": item.quantity} for item in items
+                    ],
+                },
+                headers={"X-Service-Key": "dev-service-key"},
+            )
+
         response.raise_for_status()
 
 

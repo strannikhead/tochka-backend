@@ -14,7 +14,13 @@ class Base(DeclarativeBase):
 
 
 class OrderStatus(enum.StrEnum):
+    CREATED = "CREATED"
     PAID = "PAID"
+    ASSEMBLING = "ASSEMBLING"
+    DELIVERING = "DELIVERING"
+    DELIVERED = "DELIVERED"
+    CANCELLED = "CANCELLED"
+    CANCEL_PENDING = "CANCEL_PENDING"
 
 
 class Order(Base):

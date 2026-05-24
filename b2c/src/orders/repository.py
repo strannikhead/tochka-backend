@@ -31,6 +31,24 @@ class OrdersRepository(Protocol):
 
     async def get_for_user(self, *, order_id: UUID, user_id: UUID) -> OrderSnapshot | None: ...
 
+    async def list_by_status(
+        self,
+        *,
+        status: str,
+        limit: int,
+        offset: int = 0,
+    ) -> list[OrderSnapshot]: ...
+
+    async def update_status_for_user(
+        self,
+        *,
+        order_id: UUID,
+        user_id: UUID,
+        status: str,
+    ) -> OrderSnapshot | None: ...
+
+    async def update_status(self, *, order_id: UUID, status: str) -> OrderSnapshot | None: ...
+
     async def list_for_user(
         self,
         *,
@@ -49,9 +67,17 @@ class CheckoutCatalogClient(Protocol):
     async def reserve(
         self,
         *,
+        order_id: UUID,
         idempotency_key: UUID,
         items: list[ReserveRequestItem],
     ) -> ReserveResult: ...
+
+    async def unreserve(
+        self,
+        *,
+        order_id: UUID,
+        items: list[ReserveRequestItem],
+    ) -> None: ...
 
 
 class UpstreamServiceError(RuntimeError):
@@ -88,6 +114,53 @@ class SqlAlchemyOrdersRepository:
             return None
         return _order_row_to_snapshot(row)
 
+    async def list_by_status(
+        self,
+        *,
+        status: str,
+        limit: int,
+        offset: int = 0,
+    ) -> list[OrderSnapshot]:
+        try:
+            db_status = DbOrderStatus(status)
+        except ValueError:
+            return []
+
+        stmt = (
+            select(OrderRow)
+            .options(selectinload(OrderRow.items))
+            .where(OrderRow.status == db_status)
+            .order_by(OrderRow.created_at.asc(), OrderRow.id.asc())
+            .offset(offset)
+            .limit(limit)
+        )
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return [_order_row_to_snapshot(row) for row in rows]
+
+    async def update_status_for_user(
+        self,
+        *,
+        order_id: UUID,
+        user_id: UUID,
+        status: str,
+    ) -> OrderSnapshot | None:
+        row = await self._load_row(order_id=order_id, user_id=user_id)
+        if row is None:
+            return None
+        row.status = DbOrderStatus(status)
+        await self._session.commit()
+        await self._session.refresh(row)
+        return _order_row_to_snapshot(row)
+
+    async def update_status(self, *, order_id: UUID, status: str) -> OrderSnapshot | None:
+        row = await self._load_row(order_id=order_id)
+        if row is None:
+            return None
+        row.status = DbOrderStatus(status)
+        await self._session.commit()
+        await self._session.refresh(row)
+        return _order_row_to_snapshot(row)
+
     async def list_for_user(
         self,
         *,
@@ -98,9 +171,11 @@ class SqlAlchemyOrdersRepository:
     ) -> tuple[list[OrderSnapshot], int]:
         conditions = [OrderRow.user_id == user_id]
         if status is not None:
-            if status != DbOrderStatus.PAID.value:
+            try:
+                db_status = DbOrderStatus(status)
+            except ValueError:
                 return [], 0
-            conditions.append(OrderRow.status == DbOrderStatus.PAID)
+            conditions.append(OrderRow.status == db_status)
 
         total_count_stmt = select(func.count()).select_from(OrderRow).where(*conditions)
         total_count = int((await self._session.execute(total_count_stmt)).scalar_one())
@@ -157,6 +232,18 @@ class SqlAlchemyOrdersRepository:
 
         return order
 
+    async def _load_row(
+        self,
+        *,
+        order_id: UUID,
+        user_id: UUID | None = None,
+    ) -> OrderRow | None:
+        conditions = [OrderRow.id == order_id]
+        if user_id is not None:
+            conditions.append(OrderRow.user_id == user_id)
+        stmt = select(OrderRow).options(selectinload(OrderRow.items)).where(*conditions).limit(1)
+        return (await self._session.execute(stmt)).scalar_one_or_none()
+
 
 class HttpCheckoutCatalogClient:
     def __init__(
@@ -188,10 +275,12 @@ class HttpCheckoutCatalogClient:
     async def reserve(
         self,
         *,
+        order_id: UUID,
         idempotency_key: UUID,
         items: list[ReserveRequestItem],
     ) -> ReserveResult:
         payload = {
+            "order_id": str(order_id),
             "idempotency_key": str(idempotency_key),
             "items": [{"sku_id": str(item.sku_id), "quantity": item.quantity} for item in items],
         }
@@ -201,6 +290,18 @@ class HttpCheckoutCatalogClient:
             _parse_failed_item(item) for item in response_payload.get("failed_items", []) or []
         )
         return ReserveResult(reserved=reserved, failed_items=failed_items)
+
+    async def unreserve(
+        self,
+        *,
+        order_id: UUID,
+        items: list[ReserveRequestItem],
+    ) -> None:
+        payload = {
+            "order_id": str(order_id),
+            "items": [{"sku_id": str(item.sku_id), "quantity": item.quantity} for item in items],
+        }
+        await self._post("/api/v1/inventory/unreserve", payload)
 
     async def _get(self, path: str, params: list[tuple[str, str]]) -> dict[str, Any]:
         url = f"{self._base_url}{path}"
