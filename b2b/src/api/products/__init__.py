@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
+from b2b.src.db import get_session
+from b2b.src.models import SKU, Product, ProductStatus
 from b2b.src.products.application.service import ProductsService
 from b2b.src.products.dependencies import get_products_service
 from b2b.src.products.domain.errors import CategoryNotFoundError
@@ -19,6 +21,8 @@ from b2b.src.public_catalog.domain.errors import (
 )
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/api/v1/products", tags=["products"])
 public_router = APIRouter(prefix="/api/v1/public", tags=["public-catalog"])
@@ -184,12 +188,59 @@ async def list_product_skus(product_id: str) -> dict[str, str]:
 async def list_products(
     request: Request,
     service: Annotated[ProductsService, Depends(get_products_service)],
+    session: Annotated[AsyncSession, Depends(get_session)],
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     status: str | None = Query(default=None),
     include_deleted: bool = Query(False),
     search: str | None = Query(default=None),
+    ids: str | None = Query(default=None),
 ) -> JSONResponse:
+    if ids:
+        parsed_ids: list[UUID] = []
+        for item in (part.strip() for part in ids.split(",") if part.strip()):
+            try:
+                parsed_ids.append(UUID(item))
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="Invalid ids parameter") from exc
+
+        stmt = (
+            select(SKU, Product)
+            .join(Product, Product.id == SKU.product_id)
+            .where(SKU.id.in_(parsed_ids))
+        )
+        rows = (await session.execute(stmt)).all()
+        product_map: dict[UUID, dict[str, object]] = {}
+        for sku, product in rows:
+            entry = product_map.setdefault(
+                product.id,
+                {
+                    "id": str(product.id),
+                    "title": product.title,
+                    "status": product.status.value,
+                    "deleted": product.status == ProductStatus.DELETED,
+                    "skus": [],
+                },
+            )
+            entry["skus"].append(
+                {
+                    "id": str(sku.id),
+                    "product_id": str(product.id),
+                    "name": sku.name,
+                    "price": sku.price,
+                    "discount": 0,
+                    "active_quantity": sku.active_quantity,
+                }
+            )
+        return JSONResponse(
+            content={
+                "items": list(product_map.values()),
+                "total_count": len(product_map),
+                "limit": len(product_map),
+                "offset": 0,
+            }
+        )
+
     # Keep compatibility: parse filters and optional category_id from query
     category_uuid = None
     # allow optional category_id in query (not part of canonical seller list, but harmless)
@@ -216,6 +267,26 @@ async def list_products(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     return JSONResponse(content=_to_response(product_list))
+
+
+def _product_to_checkout_payload(product: Product) -> dict[str, object]:
+    return {
+        "id": str(product.id),
+        "title": product.title,
+        "status": product.status.value,
+        "deleted": product.status == ProductStatus.DELETED,
+        "skus": [
+            {
+                "id": str(sku.id),
+                "product_id": str(product.id),
+                "name": sku.name,
+                "price": sku.price,
+                "discount": 0,
+                "active_quantity": sku.active_quantity,
+            }
+            for sku in product.skus
+        ],
+    }
 
 
 @router.get("/{product_id}")
