@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID, uuid5
 
-from fastapi import APIRouter, Depends, Header, Request
+from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
-from src.api.orders.dependencies import get_checkout_service
-from src.api.orders.schemas import CheckoutOrderCreateRequest, CheckoutOrderResponse
+from src.api.dependencies import get_current_user_id
+from src.api.orders.dependencies import get_checkout_service, get_orders_repository
+from src.api.orders.schemas import (
+    CheckoutOrderCreateRequest,
+    CheckoutOrderResponse,
+    OrderListItemResponse,
+    OrderStatusFilter,
+    PaginatedOrdersResponse,
+)
+from src.orders.repository import SqlAlchemyOrdersRepository
 from src.orders.service import (
     B2BUnavailableError,
     CheckoutService,
@@ -17,6 +26,63 @@ from src.orders.service import (
 )
 
 router = APIRouter(prefix="/api/v1/orders", tags=["orders"])
+
+CurrentUserId = Annotated[UUID, Depends(get_current_user_id)]
+OrdersRepositoryDep = Annotated[SqlAlchemyOrdersRepository, Depends(get_orders_repository)]
+
+
+def _format_datetime(value: datetime) -> str:
+    return value.isoformat().replace("+00:00", "Z")
+
+
+@router.get("")
+async def list_orders(
+    repository: OrdersRepositoryDep,
+    user_id: CurrentUserId,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    status: Annotated[OrderStatusFilter | None, Query()] = None,
+) -> JSONResponse:
+    orders, total_count = await repository.list_for_user(
+        user_id=user_id,
+        limit=limit,
+        offset=offset,
+        status=status.value if status is not None else None,
+    )
+    payload = PaginatedOrdersResponse(
+        items=[
+            OrderListItemResponse(
+                id=order.id,
+                status=order.status.value,
+                total_amount=order.total_amount,
+                items_count=sum(item.quantity for item in order.items),
+                created_at=_format_datetime(order.created_at),
+                updated_at=_format_datetime(order.updated_at),
+            )
+            for order in orders
+        ],
+        total_count=total_count,
+        limit=limit,
+        offset=offset,
+    )
+    return JSONResponse(status_code=200, content=payload.model_dump(mode="json"))
+
+
+@router.get("/{order_id}")
+async def get_order(
+    order_id: UUID,
+    repository: OrdersRepositoryDep,
+    user_id: CurrentUserId,
+) -> JSONResponse:
+    order = await repository.get_for_user(order_id=order_id, user_id=user_id)
+    if order is None:
+        return JSONResponse(
+            status_code=404,
+            content={"code": "ORDER_NOT_FOUND", "message": "Заказ не найден"},
+        )
+
+    payload = CheckoutOrderResponse.from_domain(order).model_dump(mode="json")
+    return JSONResponse(status_code=200, content=payload)
 
 
 @router.post("")

@@ -1,9 +1,20 @@
 from __future__ import annotations
 
+from enum import StrEnum
 from uuid import UUID
 
 from pydantic import BaseModel
 from src.orders.domain import CheckoutItemInput, CheckoutOrderInput, OrderSnapshot
+
+
+class OrderStatusFilter(StrEnum):
+    CREATED = "CREATED"
+    PAID = "PAID"
+    ASSEMBLING = "ASSEMBLING"
+    DELIVERING = "DELIVERING"
+    DELIVERED = "DELIVERED"
+    CANCELLED = "CANCELLED"
+    CANCEL_PENDING = "CANCEL_PENDING"
 
 
 class CheckoutOrderItemRequest(BaseModel):
@@ -70,3 +81,19 @@ class CheckoutOrderResponse(BaseModel):
             created_at=order.created_at.isoformat().replace("+00:00", "Z"),
             updated_at=order.updated_at.isoformat().replace("+00:00", "Z"),
         )
+
+
+class OrderListItemResponse(BaseModel):
+    id: UUID
+    status: str
+    total_amount: int
+    items_count: int
+    created_at: str
+    updated_at: str
+
+
+class PaginatedOrdersResponse(BaseModel):
+    items: list[OrderListItemResponse]
+    total_count: int
+    limit: int
+    offset: int
