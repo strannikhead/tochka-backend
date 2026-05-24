@@ -71,6 +71,9 @@ class Product(Base):
     )
     images: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     characteristics: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    # Set by Moderation Service when status becomes BLOCKED; exposed in the seller card.
+    blocking_reason_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    moderator_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
@@ -99,7 +102,13 @@ class SKU(Base):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     price: Mapped[int] = mapped_column(Integer, nullable=False)
+    discount: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # cost_price / reserved_quantity are seller-only and never exposed in B2C catalog.
+    cost_price: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    stock_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     active_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    reserved_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    article: Mapped[str | None] = mapped_column(String(255), nullable=True)
     images: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     characteristics: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(

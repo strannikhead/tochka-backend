@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from b2b.src.products.domain.errors import CategoryNotFoundError
+from b2b.src.products.domain.errors import CategoryNotFoundError, ProductNotFoundError
 from b2b.src.products.domain.models import CreateProductCommand, ProductListResponse
 from b2b.src.products.domain.repository import ProductsRepository
 
@@ -22,6 +22,21 @@ class ProductsService:
         # A freshly created product has no SKUs, so it stays in CREATED and is NOT
         # sent to moderation — that transition is the responsibility of US-B2B-02.
         return await self._repository.create_product(command)
+
+    async def get_product_for_seller(self, product_id: UUID, seller_id: UUID) -> Product:
+        # A product owned by another seller is reported as missing (404, not 403),
+        # so we never disclose that it exists.
+        product = await self._repository.get_product(product_id)
+        if product is None or product.seller_id != seller_id:
+            raise ProductNotFoundError("Товар не найден")
+        return product
+
+    async def get_product_for_service(self, product_id: UUID) -> Product:
+        # Inter-service (X-Service-Key) read: no ownership scoping, public projection.
+        product = await self._repository.get_product(product_id)
+        if product is None:
+            raise ProductNotFoundError("Товар не найден")
+        return product
 
     async def list_products(
         self,
