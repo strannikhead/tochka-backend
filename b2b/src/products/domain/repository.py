@@ -1,13 +1,18 @@
 from __future__ import annotations
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
-from b2b.src.products.domain.models import ProductListResponse
+from b2b.src.products.domain.models import CreateProductCommand, ProductListResponse
+
+if TYPE_CHECKING:
+    from b2b.src.models import Product
 
 
 class ProductsRepository(Protocol):
     async def category_exists(self, category_id: UUID) -> bool: ...
+
+    async def create_product(self, command: CreateProductCommand) -> Product: ...
 
     async def list_products(
         self,

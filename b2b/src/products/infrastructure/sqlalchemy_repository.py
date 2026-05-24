@@ -4,7 +4,11 @@ from typing import Any
 from uuid import UUID
 
 from b2b.src.models import SKU, Category, Product, ProductStatus
-from b2b.src.products.domain.models import ProductListItem, ProductListResponse
+from b2b.src.products.domain.models import (
+    CreateProductCommand,
+    ProductListItem,
+    ProductListResponse,
+)
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +21,24 @@ class SqlAlchemyProductsRepository:
         stmt = select(func.count()).select_from(Category).where(Category.id == category_id)
         count = await self._session.execute(stmt)
         return int(count.scalar() or 0) > 0
+
+    async def create_product(self, command: CreateProductCommand) -> Product:
+        product = Product(
+            seller_id=command.seller_id,
+            title=command.title,
+            slug=command.slug,
+            description=command.description,
+            category_id=command.category_id,
+            status=ProductStatus.CREATED,
+            images=[{"url": image.url, "ordering": image.ordering} for image in command.images],
+            characteristics=[
+                {"name": char.name, "value": char.value} for char in command.characteristics
+            ],
+        )
+        self._session.add(product)
+        await self._session.commit()
+        await self._session.refresh(product)
+        return product
 
     async def list_products(
         self,
