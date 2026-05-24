@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -5,11 +6,12 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from src.api.products.dependencies import get_product_card_service
 from src.api.products.schemas import CatalogProductDetailResponse
+from src.banners.repository import BannerRepository
 from src.product_card.service import ProductCardService
 
-from b2c.src.api.catalog.dependencies import get_catalog_repository
+from b2c.src.api.catalog.dependencies import get_banner_repository, get_catalog_repository
 from b2c.src.api.catalog.filters import parse_filters
-from b2c.src.api.catalog.schemas import FacetsResponse
+from b2c.src.api.catalog.schemas import BannerResponse, FacetsResponse
 from b2c.src.catalog.repository import CatalogRepository, UpstreamServiceError
 
 router = APIRouter(prefix="/api/v1", tags=["catalog"])
@@ -40,6 +42,18 @@ async def get_catalog_facets(
         return JSONResponse(status_code=status_code, content={"message": str(exc)})
 
     return FacetsResponse.from_domain(facets)
+
+
+@router.get(
+    "/catalog/banners",
+    response_model=list[BannerResponse],
+    response_model_exclude_none=True,
+)
+async def get_catalog_banners(
+    repository: Annotated[BannerRepository, Depends(get_banner_repository)],
+) -> list[BannerResponse]:
+    banners = await repository.list_active(now=datetime.now(UTC))
+    return [BannerResponse.from_domain(banner) for banner in banners]
 
 
 @router.get("/breadcrumbs")
