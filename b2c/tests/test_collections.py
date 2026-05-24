@@ -194,6 +194,32 @@ def test__unavailable_products_are_filtered_out() -> None:
     assert str(PRODUCT_BLOCKED) not in returned_ids
 
 
+def test__none_optionals_are_omitted_from_response() -> None:
+    repo = InMemoryCollectionRepository(
+        collections=[
+            CollectionStored(
+                id=COLLECTION_HITS,
+                name="Хиты продаж",
+                description=None,
+                product_ids=(PRODUCT_AVAILABLE_1,),
+                ordering=0,
+            )
+        ]
+    )
+    b2b = InMemoryCollectionsB2BClient(
+        products={PRODUCT_AVAILABLE_1: make_product(PRODUCT_AVAILABLE_1, slug=None)}
+    )
+    setup_overrides(repo, b2b)
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/catalog/collections")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "description" not in body[0]
+    assert "slug" not in body[0]["products"][0]
+
+
 def test__all_products_unavailable_returns_empty_products() -> None:
     repo = InMemoryCollectionRepository(
         collections=[

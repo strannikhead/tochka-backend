@@ -21,7 +21,7 @@ router = APIRouter(prefix="/api/v1", tags=["catalog"])
 async def get_collections(
     repository: Annotated[CollectionRepository, Depends(get_collection_repository)],
     b2b: Annotated[CollectionsB2BClient, Depends(get_collections_b2b_client)],
-) -> list[CollectionResponse] | JSONResponse:
+) -> JSONResponse:
     stored = await repository.list_active()
 
     unique_ids: list[UUID] = []
@@ -39,4 +39,8 @@ async def get_collections(
         return JSONResponse(status_code=status_code, content={"message": str(exc)})
 
     enriched = [enrich_collection(collection, products_by_id) for collection in stored]
-    return [CollectionResponse.from_domain(item) for item in enriched]
+    body = [
+        CollectionResponse.from_domain(item).model_dump(mode="json", exclude_none=True)
+        for item in enriched
+    ]
+    return JSONResponse(content=body)
