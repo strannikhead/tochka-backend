@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from src.api import cart, catalog, categories, collections, favorites, home, products
+from src.api import cart, catalog, categories, collections, favorites, home, orders, products
 
 app = FastAPI(title="B2C (catalog, cart, favorites, home)")
 
@@ -17,5 +17,6 @@ app.include_router(categories.router)
 app.include_router(catalog.router)
 app.include_router(collections.router)
 app.include_router(cart.router)
+app.include_router(orders.router)
 app.include_router(favorites.router)
 app.include_router(home.router)

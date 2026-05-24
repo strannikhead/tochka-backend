@@ -4,8 +4,8 @@ import enum
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import JSON, Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -67,8 +67,8 @@ class Product(Base):
     category_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("categories.id"), nullable=False
     )
-    images: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
-    characteristics: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    images: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    characteristics: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
@@ -98,8 +98,8 @@ class SKU(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     price: Mapped[int] = mapped_column(Integer, nullable=False)
     active_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    images: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
-    characteristics: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    images: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    characteristics: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
