@@ -6,12 +6,13 @@ from typing import Any, Protocol
 from uuid import UUID
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from src.orders.db_models import Order as OrderRow
 from src.orders.db_models import OrderItem as OrderItemRow
+from src.orders.db_models import OrderStatus as DbOrderStatus
 from src.orders.domain import (
     CatalogSkuSnapshot,
     OrderItemSnapshot,
@@ -27,6 +28,17 @@ from src.orders.domain import (
 
 class OrdersRepository(Protocol):
     async def get_by_idempotency_key(self, idempotency_key: UUID) -> OrderSnapshot | None: ...
+
+    async def get_for_user(self, *, order_id: UUID, user_id: UUID) -> OrderSnapshot | None: ...
+
+    async def list_for_user(
+        self,
+        *,
+        user_id: UUID,
+        limit: int,
+        offset: int,
+        status: str | None = None,
+    ) -> tuple[list[OrderSnapshot], int]: ...
 
     async def save(self, order: OrderSnapshot) -> OrderSnapshot: ...
 
@@ -63,6 +75,48 @@ class SqlAlchemyOrdersRepository:
         if row is None:
             return None
         return _order_row_to_snapshot(row)
+
+    async def get_for_user(self, *, order_id: UUID, user_id: UUID) -> OrderSnapshot | None:
+        stmt = (
+            select(OrderRow)
+            .options(selectinload(OrderRow.items))
+            .where(OrderRow.id == order_id, OrderRow.user_id == user_id)
+            .limit(1)
+        )
+        row = (await self._session.execute(stmt)).scalar_one_or_none()
+        if row is None:
+            return None
+        return _order_row_to_snapshot(row)
+
+    async def list_for_user(
+        self,
+        *,
+        user_id: UUID,
+        limit: int,
+        offset: int,
+        status: str | None = None,
+    ) -> tuple[list[OrderSnapshot], int]:
+        conditions = [OrderRow.user_id == user_id]
+        if status is not None:
+            if status != DbOrderStatus.PAID.value:
+                return [], 0
+            conditions.append(OrderRow.status == DbOrderStatus.PAID)
+
+        total_count_stmt = select(func.count()).select_from(OrderRow).where(*conditions)
+        total_count = int((await self._session.execute(total_count_stmt)).scalar_one())
+        if total_count == 0:
+            return [], 0
+
+        stmt = (
+            select(OrderRow)
+            .options(selectinload(OrderRow.items))
+            .where(*conditions)
+            .order_by(OrderRow.created_at.desc(), OrderRow.id.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return [_order_row_to_snapshot(row) for row in rows], total_count
 
     async def save(self, order: OrderSnapshot) -> OrderSnapshot:
         row = OrderRow(
