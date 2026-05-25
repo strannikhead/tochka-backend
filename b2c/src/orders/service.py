@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Iterable
 from uuid import UUID, uuid4
 
@@ -10,10 +11,13 @@ from src.orders.domain import (
     CheckoutOrderInput,
     OrderItemSnapshot,
     OrderSnapshot,
+    OrderStatus,
     ReserveFailedItem,
     ReserveRequestItem,
 )
 from src.orders.repository import CheckoutCatalogClient, OrdersRepository, UpstreamServiceError
+
+logger = logging.getLogger(__name__)
 
 
 class CheckoutError(RuntimeError):
@@ -48,6 +52,16 @@ class InvalidQuantityError(CheckoutError):
         )
 
 
+class CancelNotAllowedError(CheckoutError):
+    def __init__(self, current_status: str) -> None:
+        super().__init__(
+            f"Отмена невозможна: заказ в статусе {current_status}",
+            "CANCEL_NOT_ALLOWED",
+            409,
+        )
+        self.current_status = current_status
+
+
 class CheckoutService:
     def __init__(self, repository: OrdersRepository, catalog_client: CheckoutCatalogClient) -> None:
         self._repository = repository
@@ -71,6 +85,7 @@ class CheckoutService:
                 raise InvalidQuantityError()
 
             sku_ids = [item.sku_id for item in payload.items]
+            order_id = uuid4()
             try:
                 skus = await self._catalog_client.get_skus_by_ids(sku_ids)
             except UpstreamServiceError as exc:
@@ -83,6 +98,7 @@ class CheckoutService:
 
             try:
                 reserve_result = await self._catalog_client.reserve(
+                    order_id=order_id,
                     idempotency_key=payload.idempotency_key,
                     items=[
                         ReserveRequestItem(sku_id=item.sku_id, quantity=item.quantity)
@@ -101,6 +117,7 @@ class CheckoutService:
                 _build_order_item(sku=by_id[item.sku_id], item=item) for item in payload.items
             )
             order = OrderSnapshot.create(
+                order_id=order_id,
                 user_id=user_id,
                 idempotency_key=payload.idempotency_key,
                 items=order_items,
@@ -108,6 +125,42 @@ class CheckoutService:
             )
             await self._repository.save(order)
             return order, True
+
+    async def cancel_order(self, *, user_id: UUID, order_id: UUID) -> OrderSnapshot | None:
+        order = await self._repository.get_for_user(order_id=order_id, user_id=user_id)
+        if order is None:
+            return None
+
+        if order.status not in {OrderStatus.CREATED, OrderStatus.PAID}:
+            raise CancelNotAllowedError(order.status.value)
+
+        try:
+            await self._catalog_client.unreserve(
+                order_id=order.id,
+                items=[
+                    ReserveRequestItem(sku_id=item.sku_id, quantity=item.quantity)
+                    for item in order.items
+                ],
+            )
+        except UpstreamServiceError as exc:
+            logger.exception("Failed to unreserve order %s, marking as CANCEL_PENDING", order.id)
+            pending_order = await self._repository.update_status_for_user(
+                order_id=order.id,
+                user_id=user_id,
+                status=OrderStatus.CANCEL_PENDING.value,
+            )
+            if pending_order is None:
+                raise RuntimeError("Order disappeared while marking CANCEL_PENDING") from exc
+            return pending_order
+
+        cancelled_order = await self._repository.update_status_for_user(
+            order_id=order.id,
+            user_id=user_id,
+            status=OrderStatus.CANCELLED.value,
+        )
+        if cancelled_order is None:
+            raise RuntimeError("Order disappeared while marking CANCELLED")
+        return cancelled_order
 
     async def _get_lock(self, idempotency_key: UUID) -> asyncio.Lock:
         async with self._lock_guard:

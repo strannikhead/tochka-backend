@@ -1,0 +1,27 @@
+version: '3.8'
+services:
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  celery-worker:
+    build:
+      context: .
+      dockerfile: b2c/Dockerfile
+    depends_on:
+      - redis
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - REDIS_URL=redis://redis:6379/0
+    command: >
+      celery -A b2c.src.orders.retry_pending_cancellations.celery_app worker --loglevel=info
+    restart: unless-stopped
+    # optional: mount code for live-reload during development
+    volumes:
+      - ./:/app
+
+networks:
+  default:
+    driver: bridge

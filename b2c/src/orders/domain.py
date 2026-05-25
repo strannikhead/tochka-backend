@@ -7,7 +7,13 @@ from datetime import UTC, datetime
 
 
 class OrderStatus(enum.StrEnum):
+    CREATED = "CREATED"
     PAID = "PAID"
+    ASSEMBLING = "ASSEMBLING"
+    DELIVERING = "DELIVERING"
+    DELIVERED = "DELIVERED"
+    CANCELLED = "CANCELLED"
+    CANCEL_PENDING = "CANCEL_PENDING"
 
 
 @dataclass(frozen=True)
@@ -83,6 +89,7 @@ class OrderSnapshot:
     def create(
         cls,
         *,
+        order_id: uuid.UUID | None = None,
         user_id: uuid.UUID,
         idempotency_key: uuid.UUID,
         items: tuple[OrderItemSnapshot, ...],
@@ -91,7 +98,7 @@ class OrderSnapshot:
         now = datetime.now(UTC)
         total_amount = sum(item.line_total for item in items)
         return cls(
-            id=uuid.uuid4(),
+            id=order_id or uuid.uuid4(),
             user_id=user_id,
             idempotency_key=idempotency_key,
             status=OrderStatus.PAID,

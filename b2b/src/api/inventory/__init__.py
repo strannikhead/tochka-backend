@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -15,6 +16,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 router = APIRouter(prefix="/api/v1/inventory", tags=["inventory"])
 
@@ -26,6 +28,11 @@ class InventoryItemRequest(BaseModel):
 
 class ReserveRequest(BaseModel):
     idempotency_key: UUID
+    order_id: UUID
+    items: list[InventoryItemRequest]
+
+
+class UnreserveRequest(BaseModel):
     order_id: UUID
     items: list[InventoryItemRequest]
 
@@ -152,5 +159,80 @@ async def reserve_inventory(
             "order_id": str(request.order_id),
             "status": "RESERVED",
             "reserved_at": reservation.reserved_at.isoformat().replace("+00:00", "Z"),
+        },
+    )
+
+
+@router.post("/unreserve")
+async def unreserve_inventory(
+    payload: dict,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    x_service_key: str | None = Header(default=None, alias="X-Service-Key"),
+) -> JSONResponse:
+    try:
+        request = UnreserveRequest.model_validate(payload)
+    except ValidationError:
+        return JSONResponse(
+            status_code=400,
+            content={"code": "INVALID_REQUEST", "message": "Invalid unreserve payload"},
+        )
+
+    if x_service_key is None:
+        return JSONResponse(
+            status_code=401, content={"code": "UNAUTHORIZED", "message": "Missing service key"}
+        )
+
+    existing_stmt = (
+        select(InventoryReservation)
+        .options(selectinload(InventoryReservation.items))
+        .where(InventoryReservation.order_id == request.order_id)
+        .limit(1)
+    )
+    reservation = (await session.execute(existing_stmt)).scalar_one_or_none()
+    processed_at = datetime.now(UTC)
+
+    if reservation is None:
+        return JSONResponse(
+            status_code=200,
+            content={
+                "order_id": str(request.order_id),
+                "status": "UNRESERVED",
+                "processed_at": processed_at.isoformat().replace("+00:00", "Z"),
+            },
+        )
+
+    if reservation.status == InventoryReservationStatus.UNRESERVED:
+        effective_at = reservation.processed_at or reservation.reserved_at
+        return JSONResponse(
+            status_code=200,
+            content={
+                "order_id": str(reservation.order_id),
+                "status": "UNRESERVED",
+                "processed_at": effective_at.isoformat().replace("+00:00", "Z"),
+            },
+        )
+
+    sku_by_id = {}
+    for item in reservation.items:
+        sku = await session.get(SKU, item.sku_id)
+        if sku is not None:
+            sku_by_id[item.sku_id] = sku
+
+    for item in reservation.items:
+        sku = sku_by_id.get(item.sku_id)
+        if sku is None:
+            continue
+        sku.active_quantity += item.requested
+
+    reservation.status = InventoryReservationStatus.UNRESERVED
+    reservation.processed_at = processed_at
+    await session.commit()
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            "order_id": str(reservation.order_id),
+            "status": "UNRESERVED",
+            "processed_at": processed_at.isoformat().replace("+00:00", "Z"),
         },
     )

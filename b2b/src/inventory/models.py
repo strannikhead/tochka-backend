@@ -12,6 +12,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 class InventoryReservationStatus(enum.StrEnum):
     RESERVED = "RESERVED"
+    UNRESERVED = "UNRESERVED"
 
 
 class InventoryReservation(Base):
@@ -34,6 +35,7 @@ class InventoryReservation(Base):
     reserved_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     items: Mapped[list[InventoryReservationItem]] = relationship(
         "InventoryReservationItem", back_populates="reservation", cascade="all, delete-orphan"
