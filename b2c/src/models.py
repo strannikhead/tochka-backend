@@ -143,6 +143,7 @@ class CartItem(Base):
     session_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     sku_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    unavailable_reason: Mapped[str | None] = mapped_column(String(50), nullable=True)
     added_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
@@ -155,6 +156,20 @@ class CartItem(Base):
 
     # Relationships
     user: Mapped[User | None] = relationship("User", back_populates="cart_items")
+
+
+class EventIdempotencyKey(Base):
+    """Processed B2B event idempotency keys."""
+
+    __tablename__ = "event_idempotency_keys"
+
+    idempotency_key: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, nullable=False
+    )
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
 
 
 class Address(Base):

@@ -47,6 +47,7 @@ def test_databases(tmp_path: Path) -> Generator[None]:
 
             category_id = UUID("550e8400-e29b-41d4-a716-446655440010")
             product_id = UUID("550e8400-e29b-41d4-a716-446655440000")
+            seller_id = UUID("550e8400-e29b-41d4-a716-446655440000")
             sku_1 = UUID("7c9e6679-7425-40de-944b-e07fc1f90ae7")
             sku_2 = UUID("8a4e3f9c-1a2b-4c8d-9e5f-6b7a8c9d0e1f")
 
@@ -63,6 +64,7 @@ def test_databases(tmp_path: Path) -> Generator[None]:
 
             product = B2BProduct(
                 id=product_id,
+                seller_id=seller_id,
                 title="iPhone 15 Pro Max",
                 description="Flagship",
                 status=B2BProductStatus.MODERATED,

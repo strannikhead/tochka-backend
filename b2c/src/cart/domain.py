@@ -14,6 +14,7 @@ class CartItemStored:
     quantity: int
     added_at: datetime
     updated_at: datetime
+    unavailable_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -64,13 +65,16 @@ def enrich_item(stored: CartItemStored, sku_data: B2BSkuData | None) -> CartItem
             available_stock=0,
             line_total=0,
             available=False,
-            unavailable_reason="PRODUCT_DELETED",
+            unavailable_reason=stored.unavailable_reason or "PRODUCT_DELETED",
         )
 
     unavailable_reason: str | None = None
     available = True
 
-    if sku_data.product_status == "BLOCKED":
+    if stored.unavailable_reason is not None:
+        available = False
+        unavailable_reason = stored.unavailable_reason
+    elif sku_data.product_status == "BLOCKED":
         available = False
         unavailable_reason = "PRODUCT_BLOCKED"
     elif sku_data.product_status not in ("MODERATED",):
