@@ -346,10 +346,11 @@ def _build_product_params(
     if sort:
         params.append(("sort", sort))
     if search:
-        params.append(("search", search))
+        # canonical param name is `q`
+        params.append(("q", search))
     for key, values in filters.items():
         for value in values:
-            params.append((f"filters[{key}]", str(value)))
+            params.append((f"filter[{key}]", str(value)))
     return params
 
 
@@ -361,7 +362,7 @@ def _build_facets_params(
     params: list[tuple[str, str]] = [("category_id", str(category_id))]
     for key, values in filters.items():
         for value in values:
-            params.append((f"filters[{key}]", str(value)))
+            params.append((f"filter[{key}]", str(value)))
     return params
 
 
@@ -414,12 +415,15 @@ def _map_public_short_to_card(payload: dict[str, Any]) -> dict[str, Any]:
                 "is_main": True,
             }
         ]
+    has_stock = bool(
+        payload.get("has_stock") or payload.get("in_stock") or payload.get("available")
+    )
     return {
         "id": str(payload.get("id", "")),
         "name": str(payload.get("title", "")),
         "slug": payload.get("slug"),
         "min_price": int(payload.get("min_price") or 0),
-        "has_stock": True,
+        "has_stock": has_stock,
         "images": images,
     }
 

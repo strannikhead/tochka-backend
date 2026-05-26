@@ -5,7 +5,7 @@ from collections.abc import Iterable
 
 from fastapi import Request
 
-DEFAULT_KNOWN_PARAMS = {"limit", "offset", "category_id", "sort", "search", "filters"}
+DEFAULT_KNOWN_PARAMS = {"limit", "offset", "category_id", "sort", "search", "filters", "filter"}
 
 
 def parse_filters(
@@ -18,12 +18,15 @@ def parse_filters(
     params = list(request.query_params.multi_items())
 
     for key, value in params:
-        if key.startswith("filters[") and key.endswith("]"):
-            name = key[len("filters[") : -1]
+        if (key.startswith("filters[") or key.startswith("filter[")) and key.endswith("]"):
+            # accept both filter[...] and filters[...] deepObject styles
+            start = key.find("[") + 1
+            name = key[start:-1]
             if name:
                 filters.setdefault(name, []).append(value)
 
-    raw_filters = request.query_params.get("filters")
+    # also accept top-level `filter` or `filters` JSON-encoded deepObject
+    raw_filters = request.query_params.get("filters") or request.query_params.get("filter")
     if raw_filters:
         try:
             parsed = json.loads(raw_filters)
