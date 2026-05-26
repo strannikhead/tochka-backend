@@ -13,6 +13,8 @@ from src.api import (
     products,
 )
 
+from b2c.src.api.errors import error_response
+
 app = FastAPI(title="B2C (catalog, cart, favorites, home)")
 
 app.add_middleware(
@@ -24,20 +26,32 @@ app.add_middleware(
 )
 
 app.include_router(products.router)
+if hasattr(products, "legacy_router"):
+    app.include_router(products.legacy_router)
 app.include_router(categories.router)
+if hasattr(categories, "legacy_router"):
+    app.include_router(categories.legacy_router)
 app.include_router(catalog.router)
+if hasattr(catalog, "legacy_router"):
+    app.include_router(catalog.legacy_router)
 app.include_router(collections.router)
 app.include_router(cart.router)
 app.include_router(events.router)
 app.include_router(orders.router)
 app.include_router(favorites.router)
 app.include_router(home.router)
+if hasattr(home, "legacy_router"):
+    app.include_router(home.legacy_router)
 
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(_: Request, exc: HTTPException) -> JSONResponse:
     if exc.status_code == 401:
-        return JSONResponse(
-            status_code=401, content={"code": "UNAUTHORIZED", "message": str(exc.detail)}
-        )
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+        return error_response(401, str(exc.detail), "UNAUTHORIZED")
+    # normalize to {message, code?}
+    return JSONResponse(status_code=exc.status_code, content={"message": str(exc.detail)})
+
+
+@app.exception_handler(Exception)
+async def generic_exception_handler(_: Request, exc: Exception) -> JSONResponse:
+    return error_response(500, "Internal server error", "INTERNAL_ERROR")
