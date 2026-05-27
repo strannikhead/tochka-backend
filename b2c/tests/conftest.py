@@ -22,8 +22,16 @@ from b2b.src.models import Product as B2BProduct  # noqa: E402
 from b2b.src.models import ProductStatus as B2BProductStatus  # noqa: E402
 from src.api.orders.dependencies import get_checkout_catalog_client  # noqa: E402
 from src.main import app  # noqa: E402
+from src.models import Address as B2CAddress  # noqa: E402
+from src.models import CartItem as B2CCartItem  # noqa: E402
+from src.models import User as B2CUser  # noqa: E402
 from src.orders.db_models import Base as B2COrdersBase  # noqa: E402
-from tests.order_test_utils import LiveCheckoutCatalogClient  # noqa: E402
+from tests.order_test_utils import (  # noqa: E402
+    CHECKOUT_USER_ID,
+    OTHER_USER_ID,
+    TEST_USER_ID,
+    LiveCheckoutCatalogClient,
+)
 
 
 @pytest.fixture()
@@ -38,6 +46,12 @@ def test_databases(tmp_path: Path) -> Generator[None]:
         async with b2b_test_engine.begin() as conn:
             await conn.run_sync(B2BBase.metadata.create_all)
         async with b2c_test_engine.begin() as conn:
+            await conn.run_sync(
+                lambda sync_conn: B2CUser.__table__.metadata.create_all(
+                    sync_conn,
+                    tables=[B2CUser.__table__, B2CAddress.__table__, B2CCartItem.__table__],
+                )
+            )
             await conn.run_sync(B2COrdersBase.metadata.create_all)
 
         async with async_sessionmaker(b2b_test_engine, expire_on_commit=False)() as session:
@@ -95,13 +109,47 @@ def test_databases(tmp_path: Path) -> Generator[None]:
             session.add(product)
             await session.commit()
 
+        async with async_sessionmaker(b2c_test_engine, expire_on_commit=False)() as session:
+            now_users = [CHECKOUT_USER_ID, TEST_USER_ID, OTHER_USER_ID]
+            for user_id in now_users:
+                session.add(
+                    B2CUser(
+                        id=user_id,
+                        email=f"{user_id.hex[:8]}@example.com",
+                        phone=None,
+                        password_hash="hash",
+                        first_name="Test",
+                        last_name="User",
+                        is_active=True,
+                    )
+                )
+                session.add(
+                    B2CAddress(
+                        id=user_id,
+                        user_id=user_id,
+                        city="Екатеринбург",
+                        street="Мира",
+                        house="19",
+                        apartment="42",
+                        postal_code="620000",
+                        is_default=True,
+                    )
+                )
+            await session.commit()
+
     asyncio.run(prepare())
 
     import b2b.src.db as b2b_db_module
+    import src.database as b2c_main_db_module
     import src.orders.db as b2c_db_module
 
     b2b_db_module.engine = b2b_test_engine
     b2b_db_module.SessionLocal = async_sessionmaker(b2b_test_engine, expire_on_commit=False)
+    b2c_main_db_module.engine = b2c_test_engine
+    b2c_main_db_module.async_session_factory = async_sessionmaker(
+        b2c_test_engine, expire_on_commit=False
+    )
+    b2c_main_db_module.SessionLocal = async_sessionmaker(b2c_test_engine, expire_on_commit=False)
     b2c_db_module.engine = b2c_test_engine
     b2c_db_module.SessionLocal = async_sessionmaker(b2c_test_engine, expire_on_commit=False)
 

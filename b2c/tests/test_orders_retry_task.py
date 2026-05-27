@@ -33,10 +33,12 @@ def _make_order(order_id: UUID, sku_id: UUID) -> OrderSnapshot:
         id=order_id,
         user_id=USER_ID,
         idempotency_key=uuid4(),
+        address_id=uuid4(),
+        payment_method_id=uuid4(),
+        request_fingerprint="fingerprint",
         status=OrderStatus.CANCEL_PENDING,
         items=(item,),
         total_amount=1000,
-        delivery_address=None,
         created_at=now,
         updated_at=now,
     )

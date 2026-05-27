@@ -9,10 +9,15 @@ from src.main import app
 from src.orders.db_models import Order as OrderRow
 from src.orders.db_models import OrderStatus as DbOrderStatus
 from src.orders.repository import UpstreamServiceError
-from tests.order_test_utils import LiveCheckoutCatalogClient, auth_header
+from tests.order_test_utils import (
+    OTHER_USER_ID,
+    TEST_USER_ID,
+    LiveCheckoutCatalogClient,
+    auth_header,
+    checkout_request_body,
+    seed_cart_items,
+)
 
-TEST_USER_ID = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
-OTHER_USER_ID = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
 SKU_ID_1 = UUID("7c9e6679-7425-40de-944b-e07fc1f90ae7")
 
 
@@ -21,14 +26,12 @@ def _set_current_user(user_id: UUID) -> None:
 
 
 def _create_order(client, *, user_id: UUID, idempotency_key: str) -> dict:
+    seed_cart_items(user_id, [(SKU_ID_1, 1)])
+    app.dependency_overrides[get_current_user_id] = lambda: user_id
     response = client.post(
         "/api/v1/orders",
-        headers=auth_header(user_id),
-        json={
-            "idempotency_key": idempotency_key,
-            "items": [{"sku_id": str(SKU_ID_1), "quantity": 1}],
-            "delivery_address": "г. Екатеринбург, ул. Мира 19, кв. 42",
-        },
+        headers={**auth_header(user_id), "Idempotency-Key": idempotency_key},
+        json=checkout_request_body(user_id=user_id),
     )
     assert response.status_code == 201
     return response.json()
