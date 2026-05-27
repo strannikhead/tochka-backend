@@ -1,11 +1,60 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
-from uuid import UUID
+from datetime import UTC, datetime
+from uuid import UUID, uuid4
 
 import httpx
 from b2b.src.main import app as b2b_app
+from src.models import CartItem
 from src.orders.domain import CatalogSkuSnapshot, ReserveFailedItem, ReserveResult
+
+CHECKOUT_USER_ID = UUID("111e8400-e29b-41d4-a716-446655440000")
+TEST_USER_ID = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+OTHER_USER_ID = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+PAYMENT_METHOD_ID = UUID("222e8400-e29b-41d4-a716-446655440000")
+
+
+def checkout_request_body(
+    *,
+    user_id: UUID,
+    comment: str | None = None,
+    items_snapshot: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "address_id": str(user_id),
+        "payment_method_id": str(PAYMENT_METHOD_ID),
+    }
+    if comment is not None:
+        payload["comment"] = comment
+    if items_snapshot is not None:
+        payload["items_snapshot"] = items_snapshot
+    return payload
+
+
+def seed_cart_items(user_id: UUID, items: list[tuple[UUID, int]]) -> None:
+    async def _seed() -> None:
+        import src.database as db_module
+
+        now = datetime.now(UTC)
+        async with db_module.SessionLocal() as session:
+            await session.execute(CartItem.__table__.delete().where(CartItem.user_id == user_id))
+            for sku_id, quantity in items:
+                session.add(
+                    CartItem(
+                        id=uuid4(),
+                        user_id=user_id,
+                        session_id=None,
+                        sku_id=sku_id,
+                        quantity=quantity,
+                        added_at=now,
+                        updated_at=now,
+                    )
+                )
+            await session.commit()
+
+    asyncio.run(_seed())
 
 
 @dataclass

@@ -25,8 +25,10 @@ class CheckoutItemInput:
 @dataclass(frozen=True)
 class CheckoutOrderInput:
     idempotency_key: uuid.UUID
+    address_id: uuid.UUID
+    payment_method_id: uuid.UUID
     items: tuple[CheckoutItemInput, ...]
-    delivery_address: str | None
+    request_fingerprint: str
 
 
 @dataclass(frozen=True)
@@ -78,10 +80,12 @@ class OrderSnapshot:
     id: uuid.UUID
     user_id: uuid.UUID
     idempotency_key: uuid.UUID
+    address_id: uuid.UUID
+    payment_method_id: uuid.UUID
+    request_fingerprint: str
     status: OrderStatus
     items: tuple[OrderItemSnapshot, ...]
     total_amount: int
-    delivery_address: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -92,8 +96,10 @@ class OrderSnapshot:
         order_id: uuid.UUID | None = None,
         user_id: uuid.UUID,
         idempotency_key: uuid.UUID,
+        address_id: uuid.UUID,
+        payment_method_id: uuid.UUID,
+        request_fingerprint: str,
         items: tuple[OrderItemSnapshot, ...],
-        delivery_address: str | None,
     ) -> OrderSnapshot:
         now = datetime.now(UTC)
         total_amount = sum(item.line_total for item in items)
@@ -101,10 +107,12 @@ class OrderSnapshot:
             id=order_id or uuid.uuid4(),
             user_id=user_id,
             idempotency_key=idempotency_key,
+            address_id=address_id,
+            payment_method_id=payment_method_id,
+            request_fingerprint=request_fingerprint,
             status=OrderStatus.PAID,
             items=items,
             total_amount=total_amount,
-            delivery_address=delivery_address,
             created_at=now,
             updated_at=now,
         )

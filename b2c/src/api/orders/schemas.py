@@ -4,7 +4,8 @@ from enum import StrEnum
 from uuid import UUID
 
 from pydantic import BaseModel
-from src.orders.domain import CheckoutItemInput, CheckoutOrderInput, OrderSnapshot
+from src.models import Address
+from src.orders.domain import OrderSnapshot
 
 
 class OrderStatusFilter(StrEnum):
@@ -17,83 +18,110 @@ class OrderStatusFilter(StrEnum):
     CANCEL_PENDING = "CANCEL_PENDING"
 
 
-class CheckoutOrderItemRequest(BaseModel):
+class CheckoutOrderSnapshotItemRequest(BaseModel):
     sku_id: UUID
     quantity: int
-
-    def to_domain(self) -> CheckoutItemInput:
-        return CheckoutItemInput(sku_id=self.sku_id, quantity=self.quantity)
+    unit_price: int
 
 
 class CheckoutOrderCreateRequest(BaseModel):
-    idempotency_key: UUID
-    items: list[CheckoutOrderItemRequest]
-    delivery_address: str | None = None
-
-    def to_domain(self) -> CheckoutOrderInput:
-        return CheckoutOrderInput(
-            idempotency_key=self.idempotency_key,
-            items=tuple(item.to_domain() for item in self.items),
-            delivery_address=self.delivery_address,
-        )
+    address_id: UUID
+    payment_method_id: UUID
+    comment: str | None = None
+    items_snapshot: list[CheckoutOrderSnapshotItemRequest] | None = None
 
 
 class CheckoutOrderItemResponse(BaseModel):
     id: UUID
     sku_id: UUID
     product_id: UUID
-    product_title: str
-    sku_name: str
+    name: str
     quantity: int
     unit_price: int
     line_total: int
+    sku_code: str | None = None
+    image_url: str | None = None
+
+    @classmethod
+    def from_domain(cls, item) -> CheckoutOrderItemResponse:
+        name = " ".join(part for part in (item.product_title, item.sku_name) if part).strip()
+        return cls(
+            id=item.id,
+            sku_id=item.sku_id,
+            product_id=item.product_id,
+            name=name,
+            quantity=item.quantity,
+            unit_price=item.unit_price,
+            line_total=item.line_total,
+            sku_code=None,
+            image_url=None,
+        )
+
+
+class OrderAddressResponse(BaseModel):
+    id: UUID
+    country: str
+    region: str | None = None
+    city: str
+    street: str
+    building: str
+    apartment: str | None = None
+    postal_code: str | None = None
+    recipient_name: str | None = None
+    recipient_phone: str | None = None
+    is_default: bool = False
+    comment: str | None = None
+    created_at: str
+
+    @classmethod
+    def from_model(cls, address: Address) -> OrderAddressResponse:
+        return cls(
+            id=address.id,
+            country="Россия",
+            region=None,
+            city=address.city,
+            street=address.street,
+            building=address.house,
+            apartment=address.apartment,
+            postal_code=address.postal_code,
+            recipient_name=None,
+            recipient_phone=None,
+            is_default=address.is_default,
+            comment=None,
+            created_at=address.created_at.isoformat().replace("+00:00", "Z"),
+        )
 
 
 class CheckoutOrderResponse(BaseModel):
     id: UUID
+    buyer_id: UUID
     status: str
     items: list[CheckoutOrderItemResponse]
-    total_amount: int
-    delivery_address: str | None = None
+    subtotal: int
+    total: int
+    address: OrderAddressResponse
+    comment: str | None = None
     created_at: str
     updated_at: str
 
     @classmethod
-    def from_domain(cls, order: OrderSnapshot) -> CheckoutOrderResponse:
+    def from_domain(cls, order: OrderSnapshot, address: Address) -> CheckoutOrderResponse:
         return cls(
             id=order.id,
+            buyer_id=order.user_id,
             status=order.status.value,
-            items=[
-                CheckoutOrderItemResponse(
-                    id=item.id,
-                    sku_id=item.sku_id,
-                    product_id=item.product_id,
-                    product_title=item.product_title,
-                    sku_name=item.sku_name,
-                    quantity=item.quantity,
-                    unit_price=item.unit_price,
-                    line_total=item.line_total,
-                )
-                for item in order.items
-            ],
-            total_amount=order.total_amount,
-            delivery_address=order.delivery_address,
+            items=[CheckoutOrderItemResponse.from_domain(item) for item in order.items],
+            subtotal=order.total_amount,
+            total=order.total_amount,
+            address=OrderAddressResponse.from_model(address),
+            comment=None,
             created_at=order.created_at.isoformat().replace("+00:00", "Z"),
             updated_at=order.updated_at.isoformat().replace("+00:00", "Z"),
         )
 
 
-class OrderListItemResponse(BaseModel):
-    id: UUID
-    status: str
-    total_amount: int
-    items_count: int
-    created_at: str
-    updated_at: str
-
-
 class PaginatedOrdersResponse(BaseModel):
-    items: list[OrderListItemResponse]
+    items: list[CheckoutOrderResponse]
     total_count: int
     limit: int
     offset: int

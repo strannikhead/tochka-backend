@@ -7,29 +7,31 @@ import pytest
 from fastapi.testclient import TestClient
 from src.api.dependencies import get_current_user_id
 from src.main import app
-from tests.order_test_utils import auth_header
+from tests.order_test_utils import (
+    OTHER_USER_ID,
+    TEST_USER_ID,
+    auth_header,
+    checkout_request_body,
+    seed_cart_items,
+)
 
-TEST_USER_ID = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
-OTHER_USER_ID = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
 SKU_ID_1 = UUID("7c9e6679-7425-40de-944b-e07fc1f90ae7")
 SKU_ID_2 = UUID("8a4e3f9c-1a2b-4c8d-9e5f-6b7a8c9d0e1f")
 
 
 @pytest.fixture(autouse=True)
-def clear_overrides() -> None:
+def clear_overrides():
     yield
     app.dependency_overrides = {}
 
 
 def _create_order(client: TestClient, *, user_id: UUID, idempotency_key: str, sku_id: UUID) -> dict:
+    seed_cart_items(user_id, [(sku_id, 1)])
+    app.dependency_overrides[get_current_user_id] = lambda: user_id
     response = client.post(
         "/api/v1/orders",
-        headers=auth_header(user_id),
-        json={
-            "idempotency_key": idempotency_key,
-            "items": [{"sku_id": str(sku_id), "quantity": 1}],
-            "delivery_address": "г. Екатеринбург, ул. Мира 19, кв. 42",
-        },
+        headers={**auth_header(user_id), "Idempotency-Key": idempotency_key},
+        json=checkout_request_body(user_id=user_id),
     )
     assert response.status_code == 201
     return response.json()
@@ -87,7 +89,7 @@ def test_orders_list_returns_own_orders_paginated(client: TestClient) -> None:
     assert payload["offset"] == 1
     assert len(payload["items"]) == 1
     assert payload["items"][0]["id"] == first_order["id"]
-    assert payload["items"][0]["items_count"] == 1
+    assert payload["items"][0]["buyer_id"] == str(TEST_USER_ID)
 
 
 def test_order_detail_shows_fixed_prices(client: TestClient) -> None:
@@ -106,9 +108,12 @@ def test_order_detail_shows_fixed_prices(client: TestClient) -> None:
     payload = response.json()
     assert payload["id"] == order["id"]
     assert payload["status"] == "PAID"
-    assert payload["total_amount"] == 12999000
+    assert payload["buyer_id"] == str(TEST_USER_ID)
+    assert payload["subtotal"] == 12999000
+    assert payload["total"] == 12999000
     assert payload["items"][0]["unit_price"] == 12999000
     assert payload["items"][0]["line_total"] == 12999000
+    assert payload["address"]["id"] == str(TEST_USER_ID)
 
 
 def test_other_user_order_returns_404_not_403(client: TestClient) -> None:

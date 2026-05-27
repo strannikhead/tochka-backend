@@ -62,6 +62,13 @@ class CancelNotAllowedError(CheckoutError):
         self.current_status = current_status
 
 
+class IdempotencyConflictError(CheckoutError):
+    def __init__(self) -> None:
+        super().__init__(
+            "Idempotency key already used with different request", "IDEMPOTENCY_CONFLICT", 409
+        )
+
+
 class CheckoutService:
     def __init__(self, repository: OrdersRepository, catalog_client: CheckoutCatalogClient) -> None:
         self._repository = repository
@@ -76,6 +83,8 @@ class CheckoutService:
         async with lock:
             existing = await self._repository.get_by_idempotency_key(payload.idempotency_key)
             if existing is not None:
+                if existing.request_fingerprint != payload.request_fingerprint:
+                    raise IdempotencyConflictError()
                 return existing, False
 
             if not payload.items:
@@ -120,8 +129,10 @@ class CheckoutService:
                 order_id=order_id,
                 user_id=user_id,
                 idempotency_key=payload.idempotency_key,
+                address_id=payload.address_id,
+                payment_method_id=payload.payment_method_id,
+                request_fingerprint=payload.request_fingerprint,
                 items=order_items,
-                delivery_address=payload.delivery_address,
             )
             await self._repository.save(order)
             return order, True

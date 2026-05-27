@@ -216,6 +216,9 @@ def test_orders_not_affected_by_product_blocked(tmp_path) -> None:
             order = OrderSnapshot.create(
                 user_id=TEST_USER_ID,
                 idempotency_key=ORDER_IDEMPOTENCY_KEY,
+                address_id=UUID("111e8400-e29b-41d4-a716-446655440011"),
+                payment_method_id=UUID("111e8400-e29b-41d4-a716-446655440012"),
+                request_fingerprint="fingerprint",
                 items=(
                     OrderItemSnapshot(
                         id=UUID("111e8400-e29b-41d4-a716-446655440010"),
@@ -228,7 +231,6 @@ def test_orders_not_affected_by_product_blocked(tmp_path) -> None:
                         line_total=12999000,
                     ),
                 ),
-                delivery_address="г. Екатеринбург, ул. Мира 19, кв. 42",
             )
             saved = await repo.save(order)
             return saved.id, saved.total_amount
