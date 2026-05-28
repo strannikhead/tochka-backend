@@ -10,6 +10,7 @@ from src.api.collections.dependencies import (
     get_collections_b2b_client,
 )
 from src.api.collections.schemas import CollectionResponse
+from src.api.errors import error_response
 from src.collections.b2b_client import CollectionsB2BClient, CollectionsB2BError
 from src.collections.domain import enrich_collection
 from src.collections.repository import CollectionRepository
@@ -36,7 +37,7 @@ async def get_collections(
         products_by_id = await b2b.get_products_batch(unique_ids)
     except CollectionsB2BError as exc:
         status_code = exc.status_code or 502
-        return JSONResponse(status_code=status_code, content={"message": str(exc)})
+        return error_response(status_code, "UPSTREAM_UNAVAILABLE", str(exc))
 
     enriched = [enrich_collection(collection, products_by_id) for collection in stored]
     body = [
