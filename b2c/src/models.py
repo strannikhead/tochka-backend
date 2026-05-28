@@ -1,6 +1,5 @@
 """Database models for B2C service."""
 
-import enum
 import uuid
 from datetime import UTC, datetime
 
@@ -8,7 +7,6 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
-    Enum,
     ForeignKey,
     Integer,
     String,
@@ -23,17 +21,6 @@ class Base(DeclarativeBase):
     """Base class for all SQLAlchemy models."""
 
     pass
-
-
-class OrderStatus(enum.Enum):
-    """Order status enum."""
-
-    PENDING = "PENDING"
-    CONFIRMED = "CONFIRMED"
-    PROCESSING = "PROCESSING"
-    SHIPPED = "SHIPPED"
-    DELIVERED = "DELIVERED"
-    CANCELLED = "CANCELLED"
 
 
 class User(Base):
@@ -68,7 +55,6 @@ class User(Base):
     addresses: Mapped[list[Address]] = relationship(
         "Address", back_populates="user", cascade="all, delete-orphan"
     )
-    orders: Mapped[list[Order]] = relationship("Order", back_populates="user")
     product_subscriptions: Mapped[list[ProductSubscription]] = relationship(
         "ProductSubscription",
         back_populates="user",
@@ -199,62 +185,6 @@ class Address(Base):
 
     # Relationships
     user: Mapped[User] = relationship("User", back_populates="addresses")
-    orders: Mapped[list[Order]] = relationship("Order", back_populates="address")
-
-
-class Order(Base):
-    """Order model."""
-
-    __tablename__ = "orders"
-
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
-    )
-    status: Mapped[OrderStatus] = mapped_column(
-        Enum(OrderStatus, name="order_status"), nullable=False, default=OrderStatus.PENDING
-    )
-    total_price: Mapped[int] = mapped_column(Integer, nullable=False)
-    address_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("addresses.id"), nullable=False
-    )
-    delivery_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(UTC),
-        onupdate=lambda: datetime.now(UTC),
-    )
-
-    # Relationships
-    user: Mapped[User] = relationship("User", back_populates="orders")
-    address: Mapped[Address] = relationship("Address", back_populates="orders")
-    items: Mapped[list[OrderItem]] = relationship(
-        "OrderItem", back_populates="order", cascade="all, delete-orphan"
-    )
-
-
-class OrderItem(Base):
-    """Order item model."""
-
-    __tablename__ = "order_items"
-
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    order_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("orders.id"), nullable=False, index=True
-    )
-    sku_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
-    price: Mapped[int] = mapped_column(Integer, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
-    )
-
-    # Relationships
-    order: Mapped[Order] = relationship("Order", back_populates="items")
 
 
 class Banner(Base):

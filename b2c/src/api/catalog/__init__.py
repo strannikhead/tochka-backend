@@ -4,6 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
+from src.api.errors import error_response
 from src.api.products.dependencies import get_product_card_service
 from src.product_card.service import ProductCardService
 
@@ -11,7 +12,6 @@ from b2c.src.api.catalog.dependencies import get_banner_repository, get_catalog_
 from b2c.src.api.catalog.filters import parse_filters
 from b2c.src.api.catalog.schemas import BannerResponse, FacetsResponse
 from b2c.src.api.catalog.static_data import breadcrumbs
-from b2c.src.api.errors import error_response
 from b2c.src.api.products.schemas import CatalogProductDetailResponse
 from b2c.src.catalog.repository import CatalogRepository, UpstreamServiceError
 
