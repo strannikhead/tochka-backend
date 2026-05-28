@@ -7,6 +7,8 @@ import pytest
 from fastapi.testclient import TestClient
 from src.api.dependencies import get_current_user_id
 from src.main import app
+from src.orders.db_models import Order as B2COrder
+from src.orders.db_models import OrderStatus as B2COrderStatus
 from tests.order_test_utils import (
     OTHER_USER_ID,
     TEST_USER_ID,
@@ -52,6 +54,16 @@ def _set_current_user(user_id: UUID) -> None:
     app.dependency_overrides[get_current_user_id] = lambda: user_id
 
 
+async def _set_order_status(order_id: UUID, status: B2COrderStatus) -> None:
+    from src.orders import db as orders_db_module
+
+    async with orders_db_module.SessionLocal() as session:
+        order = await session.get(B2COrder, order_id)
+        assert order is not None
+        order.status = status
+        await session.commit()
+
+
 def test_orders_list_requires_auth(client: TestClient) -> None:
     response = client.get("/api/v1/orders")
 
@@ -90,6 +102,8 @@ def test_orders_list_returns_own_orders_paginated(client: TestClient) -> None:
     assert len(payload["items"]) == 1
     assert payload["items"][0]["id"] == first_order["id"]
     assert payload["items"][0]["buyer_id"] == str(TEST_USER_ID)
+    assert payload["items"][0]["items"][0]["name"] == "iPhone 15 Pro Max 256GB Black"
+    assert payload["items"][0]["address"]["city"] == "Екатеринбург"
 
 
 def test_order_detail_shows_fixed_prices(client: TestClient) -> None:
@@ -113,7 +127,29 @@ def test_order_detail_shows_fixed_prices(client: TestClient) -> None:
     assert payload["total"] == 12999000
     assert payload["items"][0]["unit_price"] == 12999000
     assert payload["items"][0]["line_total"] == 12999000
+    assert payload["items"][0]["name"] == "iPhone 15 Pro Max 256GB Black"
     assert payload["address"]["id"] == str(TEST_USER_ID)
+    assert payload["address"]["country"] == "Россия"
+    assert payload["address"]["building"] == "19"
+
+
+def test_orders_list_filters_other_statuses(client: TestClient) -> None:
+    order = _create_order(
+        client,
+        user_id=TEST_USER_ID,
+        idempotency_key="f47ac10b-58cc-4372-a567-0e02b2c3d47e",
+        sku_id=SKU_ID_1,
+    )
+    asyncio.run(_set_order_status(UUID(order["id"]), B2COrderStatus.DELIVERED))
+
+    _set_current_user(TEST_USER_ID)
+    response = client.get("/api/v1/orders?status=DELIVERED")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total_count"] == 1
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["status"] == "DELIVERED"
 
 
 def test_other_user_order_returns_404_not_403(client: TestClient) -> None:
