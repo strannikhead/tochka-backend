@@ -2,16 +2,19 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 from uuid import UUID
 
+import httpx
 from fastapi import APIRouter, Depends, Query, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from src.api.errors import error_response
 from src.api.products.dependencies import get_product_card_service
+from src.product_card.repository import UpstreamServiceError as ProductUpstreamServiceError
 from src.product_card.service import ProductCardService
 
 from b2c.src.api.catalog.dependencies import get_banner_repository, get_catalog_repository
 from b2c.src.api.catalog.filters import parse_filters
 from b2c.src.api.catalog.schemas import BannerResponse, FacetsResponse
 from b2c.src.api.catalog.static_data import breadcrumbs
+from b2c.src.api.errors import error_response
 from b2c.src.api.products.schemas import CatalogProductDetailResponse
 from b2c.src.catalog.repository import CatalogRepository, UpstreamServiceError
 
@@ -25,22 +28,26 @@ async def get_catalog_facets(
     category_id: str | None = Query(default=None),
 ) -> FacetsResponse | JSONResponse:
     if category_id is None:
-        return error_response(400, "category_id is required")
+        return error_response(400, "INVALID_REQUEST", "category_id is required")
     try:
         category_uuid = UUID(category_id)
     except ValueError:
-        return error_response(400, "Invalid category_id")
+        return error_response(400, "INVALID_REQUEST", "Invalid category_id")
 
     try:
         filters = parse_filters(request, allow_unscoped=True)
     except ValueError:
-        return error_response(400, "Invalid filters format")
+        return error_response(400, "INVALID_REQUEST", "Invalid filters format")
 
     try:
         facets = await repository.get_facets(category_id=category_uuid, filters=filters)
     except UpstreamServiceError as exc:
         status_code = 502 if exc.status_code is None else exc.status_code
-        return error_response(status_code, str(exc))
+        return error_response(status_code, "UPSTREAM_UNAVAILABLE", str(exc))
+    except httpx.HTTPError:
+        return error_response(502, "UPSTREAM_UNAVAILABLE", "Unable to reach upstream service")
+    except RequestValidationError:
+        return error_response(400, "INVALID_REQUEST", "Invalid request")
 
     return FacetsResponse.from_domain(facets)
 
@@ -58,22 +65,26 @@ async def get_breadcrumbs(category_id: str | None = None) -> list[dict[str, str]
     return breadcrumbs(category_id)
 
 
-@base.get("/products/{product_id}/similar", include_in_schema=False)
+@base.get("/products/{product_id}/similar", include_in_schema=False, response_model=None)
 async def get_similar_products(
     product_id: str,
     repository: Annotated[CatalogRepository, Depends(get_catalog_repository)],
     limit: int = Query(10, ge=1, le=50),
-) -> list[dict[str, Any]]:
+) -> list[dict[str, Any]] | JSONResponse:
     try:
         product_uuid = UUID(product_id)
     except ValueError:
-        return error_response(400, "Invalid product_id")
+        return error_response(400, "INVALID_REQUEST", "Invalid product_id")
 
     try:
         items = await repository.get_similar(product_id=product_uuid, limit=limit)
     except UpstreamServiceError as exc:
         status_code = 502 if exc.status_code is None else exc.status_code
-        return error_response(status_code, str(exc))
+        return error_response(status_code, "UPSTREAM_UNAVAILABLE", str(exc))
+    except httpx.HTTPError:
+        return error_response(502, "UPSTREAM_UNAVAILABLE", "Unable to reach upstream service")
+    except RequestValidationError:
+        return error_response(400, "INVALID_REQUEST", "Invalid request")
 
     return items
 
@@ -86,15 +97,20 @@ async def get_product_detail(
     try:
         parsed_id = UUID(product_id)
     except ValueError:
-        return error_response(400, "Invalid product_id")
+        return error_response(400, "INVALID_REQUEST", "Invalid product_id")
 
     try:
         product = await service.get_product_card(parsed_id)
-    except Exception as exc:
-        return error_response(502, str(exc))
+    except ProductUpstreamServiceError as exc:
+        status_code = 502 if exc.status_code is None else exc.status_code
+        return error_response(status_code, "UPSTREAM_UNAVAILABLE", str(exc))
+    except httpx.HTTPError:
+        return error_response(502, "UPSTREAM_UNAVAILABLE", "Unable to reach upstream service")
+    except RequestValidationError:
+        return error_response(400, "INVALID_REQUEST", "Invalid request")
 
     if product is None:
-        return error_response(404, "Product not found")
+        return error_response(404, "PRODUCT_NOT_FOUND", "Product not found")
 
     return CatalogProductDetailResponse.from_domain(product)
 

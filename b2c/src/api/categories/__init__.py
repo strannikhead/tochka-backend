@@ -34,7 +34,7 @@ async def get_category_filters(id: str) -> JSONResponse:
         async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.get(url, headers=headers)
     except httpx.RequestError:
-        return error_response(502, "Unable to reach B2B", "B2B_UNAVAILABLE")
+        return error_response(502, "B2B_UNAVAILABLE", "Unable to reach B2B")
 
     try:
         payload = response.json()

@@ -22,6 +22,7 @@ ALLOWED_SORTS = (
     "popularity",
     "price_asc",
     "price_desc",
+    "new",
     "date_desc",
     "discount_desc",
 )
@@ -42,11 +43,15 @@ async def list_products(
         try:
             category_uuid = UUID(category_id)
         except ValueError:
-            return error_response(400, "Invalid category_id")
+            return error_response(400, "INVALID_REQUEST", "Invalid category_id")
 
     if sort is not None and sort not in ALLOWED_SORTS:
         allowed = ", ".join(ALLOWED_SORTS)
-        return error_response(400, f"Invalid sort parameter. Allowed values: {allowed}")
+        return error_response(
+            400,
+            "INVALID_REQUEST",
+            f"Invalid sort parameter. Allowed values: {allowed}",
+        )
 
     legacy_search = request.query_params.get("search")
     search_value = q if q is not None else legacy_search
@@ -55,11 +60,11 @@ async def list_products(
         trimmed = search_value.strip()
         if trimmed and len(trimmed) < 3:
             return error_response(
-                400, "Search query must be at least 3 characters", "INVALID_REQUEST"
+                400, "INVALID_REQUEST", "Search query must be at least 3 characters"
             )
         if len(trimmed) > 200:
             return error_response(
-                400, "Search query must be at most 200 characters", "INVALID_REQUEST"
+                400, "INVALID_REQUEST", "Search query must be at most 200 characters"
             )
 
     # normalize search for repository call: use trimmed string or None
@@ -70,7 +75,7 @@ async def list_products(
     try:
         filters = parse_filters(request)
     except ValueError:
-        return error_response(400, "Invalid filters format")
+        return error_response(400, "INVALID_REQUEST", "Invalid filters format")
     try:
         product_list = await repository.list_products(
             category_id=category_uuid,
@@ -82,7 +87,7 @@ async def list_products(
         )
     except UpstreamServiceError as exc:
         status_code = 502 if exc.status_code is None else exc.status_code
-        return error_response(status_code, str(exc))
+        return error_response(status_code, "UPSTREAM_UNAVAILABLE", str(exc))
 
     return ProductShortListResponse.from_domain(product_list)
 
@@ -117,13 +122,13 @@ async def get_similar_products(
     try:
         parsed_id = UUID(product_id)
     except ValueError:
-        return error_response(400, "Invalid product_id")
+        return error_response(400, "INVALID_REQUEST", "Invalid product_id")
 
     try:
         products = await repository.get_similar(product_id=parsed_id, limit=limit)
     except UpstreamServiceError as exc:
         status_code = 502 if exc.status_code is None else exc.status_code
-        return error_response(status_code, str(exc))
+        return error_response(status_code, "UPSTREAM_UNAVAILABLE", str(exc))
 
     return products
 
