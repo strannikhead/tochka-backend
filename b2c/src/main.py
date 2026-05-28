@@ -47,11 +47,11 @@ if hasattr(home, "legacy_router"):
 @app.exception_handler(HTTPException)
 async def http_exception_handler(_: Request, exc: HTTPException) -> JSONResponse:
     if exc.status_code == 401:
-        return error_response(401, str(exc.detail), "UNAUTHORIZED")
+        return error_response(401, "UNAUTHORIZED", str(exc.detail))
     # normalize to {message, code?}
     return JSONResponse(status_code=exc.status_code, content={"message": str(exc.detail)})
 
 
 @app.exception_handler(Exception)
 async def generic_exception_handler(_: Request, exc: Exception) -> JSONResponse:
-    return error_response(500, "Internal server error", "INTERNAL_ERROR")
+    return error_response(500, "INTERNAL_ERROR", "Internal server error")

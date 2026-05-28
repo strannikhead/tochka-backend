@@ -122,23 +122,25 @@ class CatalogProductDetailResponse(CatalogProductCardResponse):
         )
 
 
-class ProductShortResponse(BaseModel):
-    id: UUID
-    title: str
-    image: str
-    price: int
-    in_stock: bool
-    is_in_cart: bool
-
+class ProductShortResponse(CatalogProductCardResponse):
     @classmethod
     def from_domain(cls, product: ProductShort) -> ProductShortResponse:
+        images: list[ImageRefResponse] = []
+        if product.image:
+            images = [
+                ImageRefResponse(
+                    id=product.id,
+                    url=product.image,
+                    ordering=0,
+                    is_main=True,
+                )
+            ]
         return cls(
             id=product.id,
-            title=product.title,
-            image=product.image,
-            price=product.price,
-            in_stock=product.in_stock,
-            is_in_cart=product.is_in_cart,
+            name=product.title,
+            min_price=product.price,
+            has_stock=product.in_stock,
+            images=images,
         )
 
 
@@ -146,7 +148,7 @@ class ProductShortListResponse(BaseModel):
     total_count: int
     limit: int
     offset: int
-    items: list[ProductShortResponse]
+    items: list[CatalogProductCardResponse]
 
     @classmethod
     def from_domain(cls, product_list: ProductShortList) -> ProductShortListResponse:
