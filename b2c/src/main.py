@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 from src.api import (
     cart,
     catalog,
-    categories,
+    category_navigation,
     collections,
     events,
     favorites,
@@ -28,9 +28,9 @@ app.add_middleware(
 app.include_router(products.router)
 if hasattr(products, "legacy_router"):
     app.include_router(products.legacy_router)
-app.include_router(categories.router)
-if hasattr(categories, "legacy_router"):
-    app.include_router(categories.legacy_router)
+app.include_router(category_navigation.router)
+if hasattr(category_navigation, "legacy_router"):
+    app.include_router(category_navigation.legacy_router)
 app.include_router(catalog.router)
 if hasattr(catalog, "legacy_router"):
     app.include_router(catalog.legacy_router)
