@@ -28,7 +28,7 @@ ALLOWED_SORTS = (
 )
 
 
-@base.get("/", response_model=ProductShortListResponse)
+@base.get("/", response_model=ProductShortListResponse, response_model_exclude_none=True)
 async def list_products(
     request: Request,
     repository: Annotated[CatalogRepository, Depends(get_catalog_repository)],
@@ -53,8 +53,7 @@ async def list_products(
             f"Invalid sort parameter. Allowed values: {allowed}",
         )
 
-    legacy_search = request.query_params.get("search")
-    search_value = q if q is not None else legacy_search
+    search_value = q
 
     if search_value is not None:
         trimmed = search_value.strip()
@@ -67,7 +66,6 @@ async def list_products(
                 400, "INVALID_REQUEST", "Search query must be at most 200 characters"
             )
 
-    # normalize search for repository call: use trimmed string or None
     search_for_repo = None
     if search_value is not None:
         search_for_repo = search_value.strip() or None

@@ -138,6 +138,7 @@ def test__get_sku__blocked_product_returns_404(client: TestClient) -> None:
     response = client.get(f"/api/v1/catalog/products/{product.id}")
 
     assert response.status_code == 404
+    assert response.json() == {"code": "NOT_FOUND", "message": "Товар не найден"}
 
 
 def test__get_sku__sku_without_stock_is_shown_as_unavailable(client: TestClient) -> None:

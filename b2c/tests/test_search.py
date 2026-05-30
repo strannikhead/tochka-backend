@@ -68,7 +68,7 @@ def test_search_returns_matching_products(client: TestClient) -> None:
     repository = InMemoryCatalogRepository(products=products, categories={CATEGORY_ID})
     override_repository(repository)
 
-    response = client.get("/api/v1/products", params={"search": "wireless"})
+    response = client.get("/api/v1/catalog/products", params={"q": "wireless"})
 
     assert response.status_code == 200
     payload = response.json()
@@ -77,13 +77,20 @@ def test_search_returns_matching_products(client: TestClient) -> None:
         "770e8400-e29b-41d4-a716-446655440101",
         "770e8400-e29b-41d4-a716-446655440102",
     }
+    first_item = payload["items"][0]
+    assert first_item["name"]
+    assert first_item["min_price"] == 100
+    assert first_item["has_stock"] is True
+    assert isinstance(first_item["images"], list)
+    assert first_item["images"][0]["id"] == first_item["id"]
+    assert "is_in_cart" not in first_item
 
 
 def test_short_query_returns_400(client: TestClient) -> None:
     repository = InMemoryCatalogRepository()
     override_repository(repository)
 
-    response = client.get("/api/v1/products", params={"search": "ip"})
+    response = client.get("/api/v1/catalog/products", params={"q": "ip"})
 
     assert response.status_code == 400
     payload = response.json()
@@ -102,7 +109,7 @@ def test_special_chars_do_not_break_query(client: TestClient) -> None:
     repository = InMemoryCatalogRepository(products=products, categories={CATEGORY_ID})
     override_repository(repository)
 
-    response = client.get("/api/v1/products", params={"search": "iPhone%15"})
+    response = client.get("/api/v1/catalog/products", params={"q": "iPhone%15"})
 
     assert response.status_code == 200
     payload = response.json()
@@ -120,7 +127,7 @@ def test_empty_results_returns_200(client: TestClient) -> None:
     repository = InMemoryCatalogRepository(products=products, categories={CATEGORY_ID})
     override_repository(repository)
 
-    response = client.get("/api/v1/products", params={"search": "nonexistent"})
+    response = client.get("/api/v1/catalog/products", params={"q": "nonexistent"})
 
     assert response.status_code == 200
     payload = response.json()
@@ -132,7 +139,7 @@ def test_long_query_returns_400(client: TestClient) -> None:
     repository = InMemoryCatalogRepository()
     override_repository(repository)
 
-    response = client.get("/api/v1/products", params={"search": "x" * 201})
+    response = client.get("/api/v1/catalog/products", params={"q": "x" * 201})
 
     assert response.status_code == 400
     payload = response.json()

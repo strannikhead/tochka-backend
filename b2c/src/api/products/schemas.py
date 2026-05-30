@@ -125,9 +125,12 @@ class CatalogProductDetailResponse(CatalogProductCardResponse):
 class ProductShortResponse(CatalogProductCardResponse):
     @classmethod
     def from_domain(cls, product: ProductShort) -> ProductShortResponse:
-        images: list[ImageRefResponse] = []
-        if product.image:
-            images = [
+        return cls(
+            id=product.id,
+            name=product.title,
+            min_price=product.price,
+            has_stock=product.in_stock,
+            images=[
                 ImageRefResponse(
                     id=product.id,
                     url=product.image,
@@ -135,12 +138,8 @@ class ProductShortResponse(CatalogProductCardResponse):
                     is_main=True,
                 )
             ]
-        return cls(
-            id=product.id,
-            name=product.title,
-            min_price=product.price,
-            has_stock=product.in_stock,
-            images=images,
+            if product.image
+            else [],
         )
 
 

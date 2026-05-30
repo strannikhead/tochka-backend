@@ -5,7 +5,7 @@ from collections.abc import Iterable
 
 from fastapi import Request
 
-DEFAULT_KNOWN_PARAMS = {"limit", "offset", "category_id", "sort", "search", "filters", "filter"}
+DEFAULT_KNOWN_PARAMS = {"limit", "offset", "category_id", "sort", "q", "filters", "filter"}
 
 
 def parse_filters(
