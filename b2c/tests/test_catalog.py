@@ -105,7 +105,7 @@ def test__catalog_filters__returns_only_filtered_products(client: TestClient) ->
     override_repository(repository)
 
     response = client.get(
-        "/api/v1/products",
+        "/api/v1/catalog/products",
         params={
             "category_id": str(CATEGORY_ID),
             "filters[brand]": "Apple",
@@ -159,7 +159,7 @@ def test__catalog_sorting__orders_by_price_asc(client: TestClient) -> None:
     override_repository(repository)
 
     response = client.get(
-        "/api/v1/products",
+        "/api/v1/catalog/products",
         params={
             "category_id": str(CATEGORY_ID),
             "sort": "price_asc",
@@ -212,7 +212,7 @@ def test__catalog_pagination__applies_limit_and_offset(client: TestClient) -> No
     override_repository(repository)
 
     response = client.get(
-        "/api/v1/products",
+        "/api/v1/catalog/products",
         params={
             "category_id": str(CATEGORY_ID),
             "sort": "price_asc",
@@ -337,10 +337,23 @@ def test__invalid_sort__returns_400(client: TestClient) -> None:
     repository = InMemoryCatalogRepository(products=[], categories={CATEGORY_ID})
     override_repository(repository)
 
-    response = client.get("/api/v1/products", params={"sort": "unknown"})
+    response = client.get("/api/v1/catalog/products", params={"sort": "unknown"})
 
     assert response.status_code == 400
+    assert response.json()["code"] == "INVALID_REQUEST"
     assert "Invalid sort parameter" in response.json()["message"]
+
+
+def test__invalid_category_id__returns_400(client: TestClient) -> None:
+    repository = InMemoryCatalogRepository(products=[], categories={CATEGORY_ID})
+    override_repository(repository)
+
+    response = client.get("/api/v1/catalog/products", params={"category_id": "nope"})
+
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["code"] == "INVALID_REQUEST"
+    assert payload["message"] == "Invalid category_id"
 
 
 def test__b2b_unavailable__returns_502(client: TestClient) -> None:
@@ -359,7 +372,10 @@ def test__b2b_unavailable__returns_502(client: TestClient) -> None:
 
     override_repository(UnavailableCatalogRepository(products=[], categories=set()))
 
-    response = client.get("/api/v1/products")
+    response = client.get("/api/v1/catalog/products")
 
     assert response.status_code == 502
-    assert response.json()["message"] == "B2B temporarily unavailable"
+    assert response.json() == {
+        "code": "UPSTREAM_UNAVAILABLE",
+        "message": "B2B temporarily unavailable",
+    }
