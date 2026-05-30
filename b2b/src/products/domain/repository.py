@@ -3,7 +3,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
-from b2b.src.products.domain.models import CreateProductCommand, ProductListResponse
+from b2b.src.products.domain.models import (
+    CreateProductCommand,
+    ModerationDecision,
+    ProductListResponse,
+)
 
 if TYPE_CHECKING:
     from b2b.src.models import SKU, Product
@@ -31,6 +35,8 @@ class ProductsRepository(Protocol):
     ) -> SKU: ...
 
     async def soft_delete_product(self, product_id: UUID, seller_id: UUID) -> Product: ...
+
+    async def apply_moderation_event(self, decision: ModerationDecision) -> bool: ...
 
     async def list_products(
         self,

@@ -1,4 +1,4 @@
-from b2b.src.api import categories, inventory, invoices, products, skus
+from b2b.src.api import categories, inventory, invoices, moderation, products, skus
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
@@ -66,6 +66,7 @@ app.include_router(products.public_router)
 app.include_router(inventory.router)
 app.include_router(skus.router)
 app.include_router(invoices.router)
+app.include_router(moderation.router)
 
 app.add_middleware(
     CORSMiddleware,
