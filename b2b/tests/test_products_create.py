@@ -14,10 +14,15 @@ from collections.abc import Generator
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
+import jwt
 import pytest
 from fastapi.testclient import TestClient
 
-from b2b.src.auth import get_current_seller_id
+from b2b.src.auth import (
+    JWT_ALGORITHM,
+    JWT_SECRET,
+    get_current_seller_id,
+)
 from b2b.src.main import app
 from b2b.src.models import Product, ProductStatus
 from b2b.src.products.dependencies import get_products_service
@@ -148,3 +153,52 @@ def test_missing_title_returns_422(client: TestClient) -> None:
 
     assert response.status_code == 422
     assert "title" in response.json()["message"]
+
+
+# --- Authentication (real get_current_seller_id, no override) ---
+
+
+@pytest.fixture()
+def auth_client(service: StubProductsService) -> Generator[TestClient]:
+    # Only the service is stubbed; the real JWT dependency runs so auth is exercised.
+    app.dependency_overrides = {}
+    app.dependency_overrides[get_products_service] = lambda: service
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides = {}
+
+
+def test_missing_bearer_returns_401_error_schema(auth_client: TestClient) -> None:
+    response = auth_client.post("/api/v1/products", json=_valid_body())
+
+    assert response.status_code == 401
+    payload = response.json()
+    assert payload["code"] == "UNAUTHORIZED"
+    assert payload["message"]
+
+
+def test_invalid_bearer_returns_401_error_schema(auth_client: TestClient) -> None:
+    response = auth_client.post(
+        "/api/v1/products",
+        json=_valid_body(),
+        headers={"Authorization": "Bearer not-a-real-jwt"},
+    )
+
+    assert response.status_code == 401
+    payload = response.json()
+    assert payload["code"] == "UNAUTHORIZED"
+    assert payload["message"]
+
+
+def test_valid_jwt_seller_id_drives_creation(auth_client: TestClient) -> None:
+    # A real token: seller_id is decoded from claims and lands on the created product.
+    token = jwt.encode({"sub": str(JWT_SELLER_ID)}, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+    response = auth_client.post(
+        "/api/v1/products",
+        json=_valid_body(),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["seller_id"] == str(JWT_SELLER_ID)
