@@ -209,7 +209,7 @@ def _validate_items(
                 }
             )
             continue
-        if sku.product_status == "BLOCKED":
+        if sku.product_status != "MODERATED":
             failed_items.append(
                 {
                     "sku_id": str(item.sku_id),

@@ -287,7 +287,7 @@ class HttpCheckoutCatalogClient:
             "idempotency_key": str(idempotency_key),
             "items": [{"sku_id": str(item.sku_id), "quantity": item.quantity} for item in items],
         }
-        response_payload = await self._post("/api/v1/reserve", payload)
+        response_payload = await self._post("/api/v1/inventory/reserve", payload)
         reserved = bool(response_payload.get("reserved"))
         failed_items = tuple(
             _parse_failed_item(item) for item in response_payload.get("failed_items", []) or []
