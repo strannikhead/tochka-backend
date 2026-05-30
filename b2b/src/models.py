@@ -19,6 +19,11 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
+class OutboxStatus(enum.Enum):
+    PENDING = "PENDING"
+    SENT = "SENT"
+
+
 class Base(DeclarativeBase):
     """Base class for all SQLAlchemy models."""
 
@@ -198,18 +203,20 @@ class InvoiceItem(Base):
 
 
 class OutboxEvent(Base):
-    """Internal outbox record for downstream event delivery."""
+    """Transactional outbox for events sent to downstream services."""
 
-    __tablename__ = "outbox_events"
+    __tablename__ = "moderation_outbox"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    aggregate_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    aggregate_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
     idempotency_key: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), nullable=False, unique=True
     )
-    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    product_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    status: Mapped[OutboxStatus] = mapped_column(
+        Enum(OutboxStatus, name="outbox_status"), nullable=False, default=OutboxStatus.PENDING
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
