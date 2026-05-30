@@ -44,20 +44,18 @@ async def http_exception_handler(
     request: Request, exc: StarletteHTTPException
 ) -> JSONResponse:
     # Normalize every HTTPException to the OpenAPI `Error` schema ({code, message,
-    # details}) instead of FastAPI's default {detail: ...}. Handlers that already raise
+    # details?}) instead of FastAPI's default {detail: ...}. Handlers that already raise
     # a dict detail with code+message (e.g. auth) are passed through unchanged.
+    # `details` is omitted entirely when absent so the body stays {code, message}.
     detail = exc.detail
     if isinstance(detail, dict) and "code" in detail and "message" in detail:
-        body = {
-            "code": detail["code"],
-            "message": detail["message"],
-            "details": detail.get("details"),
-        }
+        body = {"code": detail["code"], "message": detail["message"]}
+        if detail.get("details") is not None:
+            body["details"] = detail["details"]
     else:
         body = {
             "code": _STATUS_ERROR_CODES.get(exc.status_code, "ERROR"),
             "message": detail if isinstance(detail, str) else "Ошибка запроса",
-            "details": None,
         }
     return JSONResponse(status_code=exc.status_code, content=body, headers=exc.headers)
 
