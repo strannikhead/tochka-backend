@@ -141,6 +141,62 @@ class SKU(Base):
     product: Mapped[Product] = relationship("Product", back_populates="skus")
 
 
+class InvoiceStatus(enum.Enum):
+    """Incoming-goods invoice status."""
+
+    CREATED = "CREATED"
+    PARTIALLY_ACCEPTED = "PARTIALLY_ACCEPTED"
+    ACCEPTED = "ACCEPTED"
+    CANCELLED = "CANCELLED"
+
+
+class Invoice(Base):
+    """Incoming-goods invoice — the documentary basis for accepting a delivery."""
+
+    __tablename__ = "invoices"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    status: Mapped[InvoiceStatus] = mapped_column(
+        Enum(InvoiceStatus, name="invoice_status"), nullable=False, default=InvoiceStatus.CREATED
+    )
+    # accepted_* are filled later, during acceptance (separate Django Admin flow).
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    accepted_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    items: Mapped[list[InvoiceItem]] = relationship(
+        "InvoiceItem", back_populates="invoice", cascade="all, delete-orphan"
+    )
+
+
+class InvoiceItem(Base):
+    """A single SKU line within an invoice."""
+
+    __tablename__ = "invoice_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    invoice_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("invoices.id", ondelete="CASCADE"), nullable=False
+    )
+    sku_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("skus.id"), nullable=False
+    )
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Filled on acceptance; 0 at creation time.
+    accepted_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    invoice: Mapped[Invoice] = relationship("Invoice", back_populates="items")
+
+
 class OutboxEvent(Base):
     """Internal outbox record for downstream event delivery."""
 
