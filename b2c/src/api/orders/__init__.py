@@ -184,7 +184,7 @@ async def _build_cart_validation_response(
         available_reason: str | None = None
         if sku.product_deleted:
             available_reason = "PRODUCT_DELETED"
-        elif sku.product_status == "BLOCKED":
+        elif sku.product_status != "MODERATED":
             available_reason = "PRODUCT_BLOCKED"
         elif sku.active_quantity == 0:
             available_reason = "OUT_OF_STOCK"
