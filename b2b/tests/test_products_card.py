@@ -184,3 +184,21 @@ def test_service_key_returns_public_payload_without_sensitive_fields() -> None:
     sku = response.json()["skus"][0]
     assert "cost_price" not in sku
     assert "reserved_quantity" not in sku
+
+
+def test_unauthenticated_returns_401_with_error_shape() -> None:
+    # No Bearer and no X-Service-Key: the seller card requires auth. The response must
+    # follow the OpenAPI Error schema {code, message}, not FastAPI's default {detail}.
+    product = _make_product(status=ProductStatus.MODERATED)
+    # Only the service is stubbed; the real get_optional_seller_id runs and yields None.
+    app.dependency_overrides = {}
+    app.dependency_overrides[get_products_service] = lambda: StubProductsService(product)
+    client = TestClient(app)
+
+    response = client.get(f"/api/v1/products/{product.id}")
+
+    assert response.status_code == 401
+    body = response.json()
+    assert set(body.keys()) == {"code", "message"}
+    assert body["code"] == "UNAUTHORIZED"
+    assert isinstance(body["message"], str) and body["message"]
