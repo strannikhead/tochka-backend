@@ -9,3 +9,19 @@ class ProductNotFoundError(RuntimeError):
     """
 
     pass
+
+
+class ProductNotOwnedError(RuntimeError):
+    pass
+
+
+class ProductHardBlockedError(RuntimeError):
+    pass
+
+
+class SkuNotFoundError(RuntimeError):
+    pass
+
+
+class SkuNotOwnedError(RuntimeError):
+    pass

@@ -101,7 +101,7 @@ async def reserve_inventory(
                 }
             )
             continue
-        if product.status == ProductStatus.BLOCKED:
+        if product.status in {ProductStatus.BLOCKED, ProductStatus.HARD_BLOCKED}:
             failed_items.append(
                 {
                     "sku_id": str(item.sku_id),

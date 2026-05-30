@@ -15,6 +15,7 @@ dependencies = [
     "pyjwt>=2.9",
     "redis>=5.2",
     "shared",
+    "aio-pika>=9.6.2",
 ]
 
 [tool.uv]
