@@ -4,7 +4,17 @@ import enum
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -78,6 +88,8 @@ class Product(Base):
     # Soft delete: kept as a separate flag so `status` stays a valid moderation state
     # (per OpenAPI ProductStatus, which has no DELETED value). Data is never removed.
     deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Per-field moderation remarks from the last BLOCKED decision; cleared on MODERATED.
+    field_reports: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
@@ -202,3 +214,28 @@ class OutboxEvent(Base):
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ProcessedEvent(Base):
+    """Inbound-event dedup ledger guaranteeing idempotent processing.
+
+    A row per (sender_service, idempotency_key). The unique constraint makes the
+    insert the concurrency guard: a duplicate event hits the constraint and is
+    recognised as already processed, so no second status flip / cascade happens.
+    """
+
+    __tablename__ = "processed_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "sender_service", "idempotency_key", name="uq_processed_events_sender_key"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    sender_service: Mapped[str] = mapped_column(String(50), nullable=False)
+    idempotency_key: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    product_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    processed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )

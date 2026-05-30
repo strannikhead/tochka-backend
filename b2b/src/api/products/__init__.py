@@ -618,6 +618,11 @@ async def delete_product(
                 "message": "Product does not belong to the authenticated seller",
             },
         )
+    except ProductHardBlockedError:
+        return JSONResponse(
+            status_code=403,
+            content={"code": "FORBIDDEN", "message": "Cannot delete hard-blocked product"},
+        )
 
     return Response(status_code=204)
 
