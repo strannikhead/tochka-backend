@@ -4,7 +4,17 @@ import enum
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -80,6 +90,11 @@ class Product(Base):
     # Set by Moderation Service when status becomes BLOCKED; exposed in the seller card.
     blocking_reason_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     moderator_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Soft delete: kept as a separate flag so `status` stays a valid moderation state
+    # (per OpenAPI ProductStatus, which has no DELETED value). Data is never removed.
+    deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Per-field moderation remarks from the last BLOCKED decision; cleared on MODERATED.
+    field_reports: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
@@ -148,3 +163,103 @@ class ModerationOutboxEvent(Base):
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class InvoiceStatus(enum.Enum):
+    """Incoming-goods invoice status."""
+
+    CREATED = "CREATED"
+    PARTIALLY_ACCEPTED = "PARTIALLY_ACCEPTED"
+    ACCEPTED = "ACCEPTED"
+    CANCELLED = "CANCELLED"
+
+
+class Invoice(Base):
+    """Incoming-goods invoice — the documentary basis for accepting a delivery."""
+
+    __tablename__ = "invoices"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    status: Mapped[InvoiceStatus] = mapped_column(
+        Enum(InvoiceStatus, name="invoice_status"), nullable=False, default=InvoiceStatus.CREATED
+    )
+    # accepted_* are filled later, during acceptance (separate Django Admin flow).
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    accepted_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    items: Mapped[list[InvoiceItem]] = relationship(
+        "InvoiceItem", back_populates="invoice", cascade="all, delete-orphan"
+    )
+
+
+class InvoiceItem(Base):
+    """A single SKU line within an invoice."""
+
+    __tablename__ = "invoice_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    invoice_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("invoices.id", ondelete="CASCADE"), nullable=False
+    )
+    sku_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("skus.id"), nullable=False
+    )
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Filled on acceptance; 0 at creation time.
+    accepted_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    invoice: Mapped[Invoice] = relationship("Invoice", back_populates="items")
+
+
+class OutboxEvent(Base):
+    """Internal outbox record for downstream event delivery."""
+
+    __tablename__ = "outbox_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    aggregate_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    aggregate_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    idempotency_key: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, unique=True
+    )
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ProcessedEvent(Base):
+    """Inbound-event dedup ledger guaranteeing idempotent processing.
+
+    A row per (sender_service, idempotency_key). The unique constraint makes the
+    insert the concurrency guard: a duplicate event hits the constraint and is
+    recognised as already processed, so no second status flip / cascade happens.
+    """
+
+    __tablename__ = "processed_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "sender_service", "idempotency_key", name="uq_processed_events_sender_key"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    sender_service: Mapped[str] = mapped_column(String(50), nullable=False)
+    idempotency_key: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    product_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    processed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )

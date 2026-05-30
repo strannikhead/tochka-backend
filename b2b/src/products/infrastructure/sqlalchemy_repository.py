@@ -4,7 +4,14 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from b2b.src.models import SKU, Category, OutboxEvent, Product, ProductStatus
+from b2b.src.models import (
+    SKU,
+    Category,
+    OutboxEvent,
+    ProcessedEvent,
+    Product,
+    ProductStatus,
+)
 from b2b.src.products.domain.errors import (
     CategoryNotFoundError,
     ProductHardBlockedError,
@@ -15,10 +22,12 @@ from b2b.src.products.domain.errors import (
 )
 from b2b.src.products.domain.models import (
     CreateProductCommand,
+    ModerationDecision,
     ProductListItem,
     ProductListResponse,
 )
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -68,7 +77,7 @@ class SqlAlchemyProductsRepository:
             raise ProductNotOwnedError("Product does not belong to the authenticated seller")
         if product.status == ProductStatus.HARD_BLOCKED:
             raise ProductHardBlockedError("Cannot edit hard-blocked product")
-        if product.status == ProductStatus.DELETED:
+        if product.deleted:
             raise ProductNotFoundError("Товар не найден")
 
         if "category_id" in changes:
@@ -105,7 +114,7 @@ class SqlAlchemyProductsRepository:
             raise SkuNotOwnedError("SKU does not belong to the authenticated seller")
         if sku.product.status == ProductStatus.HARD_BLOCKED:
             raise ProductHardBlockedError("Cannot edit hard-blocked product")
-        if sku.product.status == ProductStatus.DELETED:
+        if sku.product.deleted:
             raise SkuNotFoundError("SKU not found")
 
         for field_name in (
@@ -128,6 +137,102 @@ class SqlAlchemyProductsRepository:
         await self._session.commit()
         return sku
 
+    async def soft_delete_product(self, product_id: UUID, seller_id: UUID) -> Product:
+        stmt = select(Product).where(Product.id == product_id).options(selectinload(Product.skus))
+        product = (await self._session.execute(stmt)).scalar_one_or_none()
+        if product is None:
+            raise ProductNotFoundError("Товар не найден")
+        if product.seller_id != seller_id:
+            raise ProductNotOwnedError("Product does not belong to the authenticated seller")
+        if product.status == ProductStatus.HARD_BLOCKED:
+            # HARD_BLOCKED is terminal: the seller can no longer edit or delete it.
+            raise ProductHardBlockedError("Cannot delete hard-blocked product")
+        if product.deleted:
+            # Already soft-deleted: no active product to remove -> 404, never a re-delete.
+            raise ProductNotFoundError("Товар не найден")
+
+        # Soft delete keeps the row and its moderation status; only the flag flips.
+        product.deleted = True
+        sku_ids = [sku.id for sku in product.skus]
+        # Both cascade events are written to the outbox in the same transaction as the
+        # flag, so the delete and its notifications commit atomically (see PR ADR).
+        for event in _build_delete_outbox_events(product.id, product.seller_id, sku_ids):
+            self._session.add(event)
+
+        await self._session.commit()
+        return product
+
+    async def apply_moderation_event(self, decision: ModerationDecision) -> bool:
+        """Apply a Moderation decision idempotently. Returns False for a duplicate."""
+        already = await self._session.execute(
+            select(ProcessedEvent).where(
+                ProcessedEvent.sender_service == decision.sender_service,
+                ProcessedEvent.idempotency_key == decision.idempotency_key,
+            )
+        )
+        if already.scalar_one_or_none() is not None:
+            return False
+
+        stmt = (
+            select(Product)
+            .where(Product.id == decision.product_id)
+            .options(selectinload(Product.skus))
+        )
+        product = (await self._session.execute(stmt)).scalar_one_or_none()
+        if product is not None:
+            self._apply_decision(product, decision)
+
+        # The unique (sender_service, idempotency_key) constraint is the real guard:
+        # a racing duplicate that passed the SELECT above fails here and is a no-op.
+        self._session.add(
+            ProcessedEvent(
+                sender_service=decision.sender_service,
+                idempotency_key=decision.idempotency_key,
+                event_type=decision.event_type,
+                product_id=decision.product_id,
+            )
+        )
+        try:
+            await self._session.commit()
+        except IntegrityError:
+            await self._session.rollback()
+            return False
+        return True
+
+    def _apply_decision(self, product: Product, decision: ModerationDecision) -> None:
+        if decision.event_type == "MODERATED":
+            # Approval clears all blocking data and makes the card catalog-visible.
+            product.status = ProductStatus.MODERATED
+            product.blocking_reason_id = None
+            product.moderator_comment = None
+            product.field_reports = []
+            return
+
+        # BLOCKED: hard_block decides between the editable BLOCKED and terminal HARD_BLOCKED.
+        product.status = (
+            ProductStatus.HARD_BLOCKED if decision.hard_block else ProductStatus.BLOCKED
+        )
+        product.blocking_reason_id = decision.blocking_reason_id
+        product.moderator_comment = decision.moderator_comment
+        product.field_reports = [
+            {
+                "field_name": report.field_name,
+                "comment": report.comment,
+                "sku_id": str(report.sku_id) if report.sku_id is not None else None,
+            }
+            for report in decision.field_reports
+        ]
+        # Cascade PRODUCT_BLOCKED to B2C only when there is sellable stock to pull.
+        if any(sku.active_quantity > 0 for sku in product.skus):
+            self._session.add(
+                _build_product_blocked_outbox_event(
+                    product.id,
+                    [sku.id for sku in product.skus],
+                    hard_block=decision.hard_block,
+                    blocking_reason_id=decision.blocking_reason_id,
+                )
+            )
+
     async def list_products(
         self,
         *,
@@ -138,7 +243,11 @@ class SqlAlchemyProductsRepository:
         offset: int,
         search: str | None,
     ) -> ProductListResponse:
-        where_clauses = [Product.status == ProductStatus.MODERATED, SKU.active_quantity > 0]
+        where_clauses = [
+            Product.status == ProductStatus.MODERATED,
+            Product.deleted.is_(False),
+            SKU.active_quantity > 0,
+        ]
         if category_id is not None:
             where_clauses.append(Product.category_id == category_id)
 
@@ -234,6 +343,72 @@ _ALLOWED_SORTS = {
     "date_desc": ("created_at", True),
     "discount_desc": ("created_at", True),
 }
+
+
+def _build_product_blocked_outbox_event(
+    product_id: UUID,
+    sku_ids: list[UUID],
+    *,
+    hard_block: bool,
+    blocking_reason_id: UUID | None,
+) -> OutboxEvent:
+    now = datetime.now(UTC)
+    idempotency_key = uuid4()
+    # B2C uses sku_ids to mark the affected cart lines as unavailable.
+    return OutboxEvent(
+        event_type="PRODUCT_BLOCKED",
+        aggregate_type="product",
+        aggregate_id=product_id,
+        idempotency_key=idempotency_key,
+        payload={
+            "idempotency_key": str(idempotency_key),
+            "product_id": str(product_id),
+            "sku_ids": [str(sku_id) for sku_id in sku_ids],
+            "hard_block": hard_block,
+            "blocking_reason_id": str(blocking_reason_id) if blocking_reason_id else None,
+            "event": "PRODUCT_BLOCKED",
+            "target": "b2c",
+            "date": now.isoformat(),
+        },
+    )
+
+
+def _build_delete_outbox_events(
+    product_id: UUID, seller_id: UUID, sku_ids: list[UUID]
+) -> list[OutboxEvent]:
+    now = datetime.now(UTC)
+    moderation_key = uuid4()
+    b2c_key = uuid4()
+    moderation_event = OutboxEvent(
+        event_type="DELETED",
+        aggregate_type="product",
+        aggregate_id=product_id,
+        idempotency_key=moderation_key,
+        payload={
+            "idempotency_key": str(moderation_key),
+            "product_id": str(product_id),
+            "seller_id": str(seller_id),
+            "event": "DELETED",
+            "target": "moderation",
+            "date": now.isoformat(),
+        },
+    )
+    # B2C needs the sku_ids to mark the corresponding cart lines as unavailable.
+    b2c_event = OutboxEvent(
+        event_type="PRODUCT_DELETED",
+        aggregate_type="product",
+        aggregate_id=product_id,
+        idempotency_key=b2c_key,
+        payload={
+            "idempotency_key": str(b2c_key),
+            "product_id": str(product_id),
+            "sku_ids": [str(sku_id) for sku_id in sku_ids],
+            "event": "PRODUCT_DELETED",
+            "target": "b2c",
+            "date": now.isoformat(),
+        },
+    )
+    return [moderation_event, b2c_event]
 
 
 def _build_edit_outbox_event(product_id: UUID, seller_id: UUID) -> OutboxEvent:

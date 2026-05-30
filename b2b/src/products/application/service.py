@@ -4,7 +4,11 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from b2b.src.products.domain.errors import CategoryNotFoundError, ProductNotFoundError
-from b2b.src.products.domain.models import CreateProductCommand, ProductListResponse
+from b2b.src.products.domain.models import (
+    CreateProductCommand,
+    ModerationDecision,
+    ProductListResponse,
+)
 from b2b.src.products.domain.repository import ProductsRepository
 
 if TYPE_CHECKING:
@@ -53,6 +57,14 @@ class ProductsService:
         changes: dict[str, object],
     ) -> SKU:
         return await self._repository.update_sku(sku_id, seller_id, changes)
+
+    async def delete_product(self, product_id: UUID, seller_id: UUID) -> Product:
+        # Soft delete + cascade events; ownership and already-deleted guards live in repo.
+        return await self._repository.soft_delete_product(product_id, seller_id)
+
+    async def apply_moderation_event(self, decision: ModerationDecision) -> bool:
+        # Idempotent application of a Moderation decision; returns False for duplicates.
+        return await self._repository.apply_moderation_event(decision)
 
     async def list_products(
         self,
