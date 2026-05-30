@@ -1,24 +1,113 @@
-from typing import Annotated
-from uuid import UUID
+from __future__ import annotations
 
-from b2b.src.api.products import SkuUpdateRequest, _serialize_sku_seller
+from typing import Annotated
+from uuid import UUID, uuid4
+
 from b2b.src.auth import get_current_seller_id
-from b2b.src.products.application.service import ProductsService
-from b2b.src.products.dependencies import get_products_service
-from b2b.src.products.domain.errors import (
-    ProductHardBlockedError,
-    SkuNotFoundError,
-    SkuNotOwnedError,
-)
+from b2b.src.config import get_settings
+from b2b.src.db import get_session
+from b2b.src.skus.application.service import SkuService
+from b2b.src.skus.domain.errors import ProductHardBlockedError, ProductNotFoundError
+from b2b.src.skus.infrastructure.moderation_client import ModerationClient
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field, field_validator
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/api/v1/skus", tags=["skus"])
 
 
-@router.post("")
-async def create_sku() -> dict[str, str]:
-    return {"endpoint": "create_sku"}
+class SKUImageCreate(BaseModel):
+    url: str
+    ordering: int = 0
+
+
+class CharacteristicCreate(BaseModel):
+    name: str
+    value: str
+
+
+class SKUCreateRequest(BaseModel):
+    product_id: UUID
+    name: str = Field(min_length=1, max_length=255)
+    price: int = Field(gt=0)
+    discount: int = Field(default=0, ge=0)
+    cost_price: int | None = Field(default=None, gt=0)
+    article: str | None = None
+    images: list[SKUImageCreate] = Field(default_factory=list)
+    characteristics: list[CharacteristicCreate] = Field(default_factory=list)
+
+    @field_validator("images")
+    @classmethod
+    def images_not_empty(cls, v: list[SKUImageCreate]) -> list[SKUImageCreate]:
+        if not v:
+            raise ValueError("At least one image is required")
+        return v
+
+
+def _get_sku_service(session: Annotated[AsyncSession, Depends(get_session)]) -> SkuService:
+    settings = get_settings()
+    client = ModerationClient(
+        base_url=settings.moderation.url,
+        service_key=settings.moderation.service_key,
+    )
+    return SkuService(session, client)
+
+
+def _serialize_sku(sku) -> dict:
+    return {
+        "id": str(sku.id),
+        "product_id": str(sku.product_id),
+        "name": sku.name,
+        "price": sku.price,
+        "discount": sku.discount,
+        "cost_price": sku.cost_price,
+        "stock_quantity": sku.stock_quantity,
+        "active_quantity": sku.active_quantity,
+        "reserved_quantity": sku.reserved_quantity,
+        "article": sku.article,
+        "images": [
+            {"id": str(img.get("id") or uuid4()), "url": img["url"], "ordering": img.get("ordering", 0)}
+            for img in (sku.images or [])
+        ],
+        "characteristics": [
+            {"id": str(c.get("id") or uuid4()), "name": c["name"], "value": c["value"]}
+            for c in (sku.characteristics or [])
+        ],
+        "created_at": sku.created_at.isoformat(),
+        "updated_at": sku.updated_at.isoformat(),
+    }
+
+
+@router.post("", status_code=201)
+async def create_sku(
+    body: SKUCreateRequest,
+    seller_id: Annotated[UUID, Depends(get_current_seller_id)],
+    service: Annotated[SkuService, Depends(_get_sku_service)],
+) -> JSONResponse:
+    try:
+        sku = await service.create_sku(
+            product_id=body.product_id,
+            seller_id=seller_id,
+            name=body.name,
+            price=body.price,
+            discount=body.discount,
+            cost_price=body.cost_price,
+            article=body.article,
+            images=[{"url": img.url, "ordering": img.ordering} for img in body.images],
+            characteristics=[{"name": c.name, "value": c.value} for c in body.characteristics],
+        )
+    except ProductNotFoundError:
+        return JSONResponse(
+            status_code=404,
+            content={"code": "NOT_FOUND", "message": "Товар не найден"},
+        )
+    except ProductHardBlockedError:
+        return JSONResponse(
+            status_code=403,
+            content={"code": "FORBIDDEN", "message": "Товар заблокирован"},
+        )
+    return JSONResponse(status_code=201, content=_serialize_sku(sku))
 
 
 @router.get("/{sku_id}")
@@ -26,59 +115,9 @@ async def get_sku(sku_id: str) -> dict[str, str]:
     return {"endpoint": "get_sku"}
 
 
-def _provided_changes(body: SkuUpdateRequest) -> dict[str, object]:
-    changes: dict[str, object] = {}
-    for field_name in ("name", "price", "discount", "cost_price", "article", "characteristics"):
-        if field_name not in body.model_fields_set:
-            continue
-        value = getattr(body, field_name)
-        if isinstance(value, list):
-            changes[field_name] = [
-                item.model_dump() if hasattr(item, "model_dump") else item for item in value
-            ]
-        else:
-            changes[field_name] = value
-    return changes
-
-
-@router.put("/{sku_id}", include_in_schema=False)
 @router.patch("/{sku_id}")
-async def update_sku(
-    sku_id: str,
-    body: SkuUpdateRequest,
-    seller_id: Annotated[UUID, Depends(get_current_seller_id)],
-    service: Annotated[ProductsService, Depends(get_products_service)],
-) -> JSONResponse:
-    try:
-        parsed = UUID(sku_id)
-    except ValueError:
-        return JSONResponse(
-            status_code=404,
-            content={"code": "NOT_FOUND", "message": "SKU not found"},
-        )
-
-    try:
-        sku = await service.update_sku(parsed, seller_id, _provided_changes(body))
-    except SkuNotFoundError:
-        return JSONResponse(
-            status_code=404,
-            content={"code": "NOT_FOUND", "message": "SKU not found"},
-        )
-    except SkuNotOwnedError:
-        return JSONResponse(
-            status_code=403,
-            content={
-                "code": "NOT_OWNER",
-                "message": "SKU does not belong to the authenticated seller",
-            },
-        )
-    except ProductHardBlockedError:
-        return JSONResponse(
-            status_code=403,
-            content={"code": "FORBIDDEN", "message": "Cannot edit hard-blocked product"},
-        )
-
-    return JSONResponse(content=_serialize_sku_seller(sku))
+async def update_sku(sku_id: str) -> dict[str, str]:
+    return {"endpoint": "update_sku"}
 
 
 @router.delete("/{sku_id}")
