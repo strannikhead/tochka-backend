@@ -11,6 +11,7 @@ from src.api.products.dependencies import get_product_repository
 from src.favorites.repository import InMemoryFavoriteRepository
 from src.main import app
 from src.product_card.domain import Characteristic, Image, Product, ProductStatus, Sku
+from src.product_card.repository import UpstreamServiceError
 
 TEST_USER_ID = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 OTHER_USER_ID = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
@@ -148,3 +149,41 @@ def test_delete_nonexistent_is_idempotent(client: TestClient) -> None:
     response = client.delete(f"/api/v1/favorites/{MISSING_PRODUCT_ID}")
 
     assert response.status_code == 204
+
+
+class _FailingProductRepository:
+    async def get_product(self, product_id: UUID) -> Product | None:
+        raise UpstreamServiceError("b2b unavailable", status_code=503)
+
+    async def get_similar_products(self, product_id: UUID, limit: int) -> list[Product]:
+        return []
+
+
+def test_list_favorites_upstream_error_uses_code_message_schema(
+    favorites_repo: InMemoryFavoriteRepository,
+) -> None:
+    """GET /favorites должен возвращать ошибку в формате Error из openapi.yaml: {code, message}."""
+
+    async def _seed() -> None:
+        await favorites_repo.add_favorite(TEST_USER_ID, PRODUCT_ID)
+
+    import asyncio
+
+    asyncio.run(_seed())
+
+    app.dependency_overrides[get_favorite_repository] = lambda: favorites_repo
+    app.dependency_overrides[get_product_repository] = lambda: _FailingProductRepository()
+    app.dependency_overrides[get_current_user_id] = lambda: TEST_USER_ID
+
+    try:
+        with TestClient(app) as tc:
+            response = tc.get("/api/v1/favorites")
+    finally:
+        app.dependency_overrides = {}
+
+    assert response.status_code == 503
+    body = response.json()
+    assert set(body.keys()) >= {"code", "message"}
+    assert isinstance(body["code"], str) and body["code"]
+    assert isinstance(body["message"], str) and body["message"]
+    assert "detail" not in body

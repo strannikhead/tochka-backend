@@ -4,7 +4,6 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from fastapi.responses import JSONResponse
 from src.api.dependencies import get_current_user_id
 from src.api.favorites.dependencies import (
     ProductClient,
@@ -24,16 +23,6 @@ from src.favorites.service import ProductNotFoundError as FavoriteProductNotFoun
 from src.product_card.repository import UpstreamServiceError
 
 router = APIRouter(prefix="/api/v1/favorites", tags=["favorites"])
-
-
-def error_response(status_code: int, code: str, message: str) -> JSONResponse:
-    return JSONResponse(
-        status_code=status_code,
-        content={
-            "code": code,
-            "message": message,
-        },
-    )
 
 
 @router.get("", response_model=PaginatedCatalogProductsResponse)
@@ -102,32 +91,32 @@ async def remove_from_favorites(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post(
-    "/{product_id}/subscribe",
-    status_code=status.HTTP_204_NO_CONTENT,
-    response_model=None,
-)
+@router.post("/{product_id}/subscribe", status_code=status.HTTP_204_NO_CONTENT)
 async def subscribe_to_product(
     product_id: UUID,
     repository: Annotated[FavoriteRepository, Depends(get_favorites_repository)],
     product_client: Annotated[ProductClient, Depends(get_product_client)],
     user_id: Annotated[UUID, Depends(get_current_user_id)],
     payload: SubscribeRequest | None = None,
-) -> Response | JSONResponse:
+) -> Response:
     try:
         await product_client.get_product(product_id)
-    except B2BProductNotFoundError:
-        return error_response(
+    except B2BProductNotFoundError as exc:
+        raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            code="PRODUCT_NOT_FOUND",
-            message="Товар с указанным идентификатором не найден",
-        )
-    except ProductServiceError:
-        return error_response(
+            detail={
+                "code": "PRODUCT_NOT_FOUND",
+                "message": "Товар с указанным идентификатором не найден",
+            },
+        ) from exc
+    except ProductServiceError as exc:
+        raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            code="SERVICE_UNAVAILABLE",
-            message="Сервис временно недоступен, попробуйте позже",
-        )
+            detail={
+                "code": "SERVICE_UNAVAILABLE",
+                "message": "Сервис временно недоступен, попробуйте позже",
+            },
+        ) from exc
 
     existing_subscription = await repository.get_product_subscription(
         user_id=user_id,
@@ -148,11 +137,7 @@ async def subscribe_to_product(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.delete(
-    "/{product_id}/subscribe",
-    status_code=status.HTTP_204_NO_CONTENT,
-    response_model=None,
-)
+@router.delete("/{product_id}/subscribe", status_code=status.HTTP_204_NO_CONTENT)
 async def unsubscribe_from_product(
     product_id: UUID,
     repository: Annotated[FavoriteRepository, Depends(get_favorites_repository)],
