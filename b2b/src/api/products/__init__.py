@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 
 from b2b.src.auth import get_current_seller_id, get_optional_seller_id
 from b2b.src.db import get_session
-from b2b.src.models import SKU, Product, ProductStatus
+from b2b.src.models import SKU, Product
 from b2b.src.products.application.service import ProductsService
 from b2b.src.products.dependencies import get_products_service
 from b2b.src.products.domain.errors import (
@@ -30,7 +30,7 @@ from b2b.src.public_catalog.domain.errors import (
 from b2b.src.public_catalog.domain.errors import (
     ProductNotFoundError as PublicProductNotFoundError,
 )
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
@@ -330,7 +330,7 @@ async def list_products(
                     "id": str(product.id),
                     "title": product.title,
                     "status": product.status.value,
-                    "deleted": product.status == ProductStatus.DELETED,
+                    "deleted": product.deleted,
                     "skus": [],
                 },
             )
@@ -386,7 +386,7 @@ def _product_to_checkout_payload(product: Product) -> dict[str, object]:
         "id": str(product.id),
         "title": product.title,
         "status": product.status.value,
-        "deleted": product.status == ProductStatus.DELETED,
+        "deleted": product.deleted,
         "skus": [
             {
                 "id": str(sku.id),
@@ -462,7 +462,7 @@ def _serialize_product_seller(product: Product) -> dict[str, object]:
         "slug": product.slug if product.slug is not None else str(product.id),
         "description": product.description,
         "status": product.status.value,
-        "deleted": product.status == ProductStatus.DELETED,
+        "deleted": product.deleted,
         "blocking_reason_id": (
             str(product.blocking_reason_id) if product.blocking_reason_id else None
         ),
@@ -590,6 +590,36 @@ async def update_product(
         )
 
     return JSONResponse(content=_serialize_product_seller(product))
+
+
+@router.delete("/{product_id}", status_code=204)
+async def delete_product(
+    product_id: str,
+    seller_id: Annotated[UUID, Depends(get_current_seller_id)],
+    service: Annotated[ProductsService, Depends(get_products_service)],
+) -> Response:
+    # Soft delete: marks deleted=true (data is kept) and emits DELETED (Moderation) +
+    # PRODUCT_DELETED (B2C, with sku_ids) cascade events. Re-deleting an already-deleted
+    # product is a 404 (no active product), per the OpenAPI DELETE responses.
+    try:
+        parsed = UUID(product_id)
+    except ValueError:
+        return JSONResponse(status_code=404, content=detail_not_found())
+
+    try:
+        await service.delete_product(parsed, seller_id)
+    except ProductNotFoundError:
+        return JSONResponse(status_code=404, content=detail_not_found())
+    except ProductNotOwnedError:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "code": "NOT_OWNER",
+                "message": "Product does not belong to the authenticated seller",
+            },
+        )
+
+    return Response(status_code=204)
 
 
 def _require_service_key(service_key: str | None) -> None:

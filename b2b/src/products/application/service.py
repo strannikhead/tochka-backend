@@ -54,6 +54,10 @@ class ProductsService:
     ) -> SKU:
         return await self._repository.update_sku(sku_id, seller_id, changes)
 
+    async def delete_product(self, product_id: UUID, seller_id: UUID) -> Product:
+        # Soft delete + cascade events; ownership and already-deleted guards live in repo.
+        return await self._repository.soft_delete_product(product_id, seller_id)
+
     async def list_products(
         self,
         *,

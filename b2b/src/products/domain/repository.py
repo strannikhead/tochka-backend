@@ -30,6 +30,8 @@ class ProductsRepository(Protocol):
         changes: dict[str, object],
     ) -> SKU: ...
 
+    async def soft_delete_product(self, product_id: UUID, seller_id: UUID) -> Product: ...
+
     async def list_products(
         self,
         *,
