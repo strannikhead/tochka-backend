@@ -47,6 +47,12 @@ if hasattr(home, "legacy_router"):
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(_: Request, exc: HTTPException) -> JSONResponse:
+    if isinstance(exc.detail, dict) and "code" in exc.detail and "message" in exc.detail:
+        return error_response(
+            exc.status_code,
+            str(exc.detail["code"]),
+            str(exc.detail["message"]),
+        )
     if exc.status_code == 401:
         code = "UNAUTHORIZED"
     elif exc.status_code == 404:
