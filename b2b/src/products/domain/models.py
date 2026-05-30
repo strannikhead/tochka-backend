@@ -30,6 +30,27 @@ class CreateProductCommand:
 
 
 @dataclass(frozen=True)
+class FieldReportInput:
+    field_name: str
+    comment: str
+    sku_id: UUID | None = None
+
+
+@dataclass(frozen=True)
+class ModerationDecision:
+    """A validated decision received from the Moderation Service."""
+
+    idempotency_key: UUID
+    product_id: UUID
+    event_type: str  # MODERATED | BLOCKED
+    hard_block: bool = False
+    blocking_reason_id: UUID | None = None
+    moderator_comment: str | None = None
+    field_reports: tuple[FieldReportInput, ...] = field(default_factory=tuple)
+    sender_service: str = "moderation"
+
+
+@dataclass(frozen=True)
 class ProductListItem:
     id: UUID
     title: str
