@@ -91,7 +91,7 @@ async def reserve_inventory(
             )
             continue
         product = await session.get(Product, sku.product_id)
-        if product is None or product.status == ProductStatus.DELETED:
+        if product is None or product.deleted:
             failed_items.append(
                 {
                     "sku_id": str(item.sku_id),
