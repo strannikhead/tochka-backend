@@ -8,7 +8,7 @@ from b2b.src.products.domain.models import CreateProductCommand, ProductListResp
 from b2b.src.products.domain.repository import ProductsRepository
 
 if TYPE_CHECKING:
-    from b2b.src.models import Product
+    from b2b.src.models import SKU, Product
 
 
 class ProductsService:
@@ -37,6 +37,22 @@ class ProductsService:
         if product is None:
             raise ProductNotFoundError("Товар не найден")
         return product
+
+    async def update_product(
+        self,
+        product_id: UUID,
+        seller_id: UUID,
+        changes: dict[str, object],
+    ) -> Product:
+        return await self._repository.update_product(product_id, seller_id, changes)
+
+    async def update_sku(
+        self,
+        sku_id: UUID,
+        seller_id: UUID,
+        changes: dict[str, object],
+    ) -> SKU:
+        return await self._repository.update_sku(sku_id, seller_id, changes)
 
     async def list_products(
         self,

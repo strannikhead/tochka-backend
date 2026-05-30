@@ -10,7 +10,12 @@ from b2b.src.db import get_session
 from b2b.src.models import SKU, Product, ProductStatus
 from b2b.src.products.application.service import ProductsService
 from b2b.src.products.dependencies import get_products_service
-from b2b.src.products.domain.errors import CategoryNotFoundError, ProductNotFoundError
+from b2b.src.products.domain.errors import (
+    CategoryNotFoundError,
+    ProductHardBlockedError,
+    ProductNotFoundError,
+    ProductNotOwnedError,
+)
 from b2b.src.products.domain.models import (
     CharacteristicInput,
     CreateProductCommand,
@@ -204,6 +209,26 @@ class ProductCreateRequest(BaseModel):
     characteristics: list[CharacteristicPayload] = Field(default_factory=list)
 
 
+class ProductUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=5000)
+    category_id: UUID | None = None
+    characteristics: list[CharacteristicPayload] | None = None
+
+
+class SkuUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    price: int | None = Field(default=None, ge=0)
+    discount: int | None = Field(default=None, ge=0)
+    cost_price: int | None = Field(default=None, ge=0)
+    article: str | None = None
+    characteristics: list[CharacteristicPayload] | None = None
+
+
 def _serialize_created_product(product: Product) -> dict[str, object]:
     return {
         "id": str(product.id),
@@ -248,8 +273,7 @@ async def create_product(
             ProductImageInput(url=image.url, ordering=image.ordering) for image in body.images
         ),
         characteristics=tuple(
-            CharacteristicInput(name=char.name, value=char.value)
-            for char in body.characteristics
+            CharacteristicInput(name=char.name, value=char.value) for char in body.characteristics
         ),
     )
     try:
@@ -509,9 +533,63 @@ def detail_not_found() -> dict[str, str]:
     return {"code": "NOT_FOUND", "message": "Товар не найден"}
 
 
+def _provided_changes(body: BaseModel, allowed_fields: tuple[str, ...]) -> dict[str, object]:
+    changes: dict[str, object] = {}
+    for field_name in allowed_fields:
+        if field_name not in body.model_fields_set:
+            continue
+        value = getattr(body, field_name)
+        if isinstance(value, list):
+            changes[field_name] = [
+                item.model_dump() if hasattr(item, "model_dump") else item for item in value
+            ]
+        else:
+            changes[field_name] = value
+    return changes
+
+
+@router.put("/{product_id}", include_in_schema=False)
 @router.patch("/{product_id}")
-async def update_product(product_id: str) -> dict[str, str]:
-    return {"endpoint": "update_product"}
+async def update_product(
+    product_id: str,
+    body: ProductUpdateRequest,
+    seller_id: Annotated[UUID, Depends(get_current_seller_id)],
+    service: Annotated[ProductsService, Depends(get_products_service)],
+) -> JSONResponse:
+    try:
+        parsed = UUID(product_id)
+    except ValueError:
+        return JSONResponse(status_code=404, content=detail_not_found())
+
+    changes = _provided_changes(body, ("title", "description", "category_id", "characteristics"))
+    try:
+        product = await service.update_product(parsed, seller_id, changes)
+    except ProductNotFoundError:
+        return JSONResponse(status_code=404, content=detail_not_found())
+    except CategoryNotFoundError:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "code": "VALIDATION_ERROR",
+                "message": "Категория не найдена",
+                "details": {"field": "category_id"},
+            },
+        )
+    except ProductNotOwnedError:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "code": "NOT_OWNER",
+                "message": "Product does not belong to the authenticated seller",
+            },
+        )
+    except ProductHardBlockedError:
+        return JSONResponse(
+            status_code=403,
+            content={"code": "FORBIDDEN", "message": "Cannot edit hard-blocked product"},
+        )
+
+    return JSONResponse(content=_serialize_product_seller(product))
 
 
 def _require_service_key(service_key: str | None) -> None:

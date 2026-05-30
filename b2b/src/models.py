@@ -22,6 +22,7 @@ class ProductStatus(enum.Enum):
     ON_MODERATION = "ON_MODERATION"
     MODERATED = "MODERATED"
     BLOCKED = "BLOCKED"
+    HARD_BLOCKED = "HARD_BLOCKED"
     DELETED = "DELETED"
 
 
@@ -123,3 +124,22 @@ class SKU(Base):
 
     # Relationships
     product: Mapped[Product] = relationship("Product", back_populates="skus")
+
+
+class OutboxEvent(Base):
+    """Internal outbox record for downstream event delivery."""
+
+    __tablename__ = "outbox_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    aggregate_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    aggregate_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    idempotency_key: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, unique=True
+    )
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

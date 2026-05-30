@@ -69,6 +69,37 @@ services:
     networks:
       - neomarket-network
 
+  rabbitmq:
+    image: rabbitmq:3.11-management-alpine
+    container_name: neomarket-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    restart: unless-stopped
+    networks:
+      - neomarket-network
+
+  b2b-outbox-worker:
+    build:
+      context: .
+      dockerfile: b2b/Dockerfile
+    container_name: b2b-outbox-worker
+    environment:
+      DATABASE_URL: postgresql://neomarket:neomarket_dev_2026@postgres:5432/neomarket_b2b
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+    command: ["python", "-m", "b2b.src.outbox.worker"]
+    restart: unless-stopped
+    networks:
+      - neomarket-network
+
 volumes:
   postgres_data:
     driver: local

@@ -1,9 +1,18 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from b2b.src.models import SKU, Category, Product, ProductStatus
+from b2b.src.models import SKU, Category, OutboxEvent, Product, ProductStatus
+from b2b.src.products.domain.errors import (
+    CategoryNotFoundError,
+    ProductHardBlockedError,
+    ProductNotFoundError,
+    ProductNotOwnedError,
+    SkuNotFoundError,
+    SkuNotOwnedError,
+)
 from b2b.src.products.domain.models import (
     CreateProductCommand,
     ProductListItem,
@@ -42,12 +51,82 @@ class SqlAlchemyProductsRepository:
         return product
 
     async def get_product(self, product_id: UUID) -> Product | None:
-        stmt = (
-            select(Product)
-            .where(Product.id == product_id)
-            .options(selectinload(Product.skus))
-        )
+        stmt = select(Product).where(Product.id == product_id).options(selectinload(Product.skus))
         return (await self._session.execute(stmt)).scalar_one_or_none()
+
+    async def update_product(
+        self,
+        product_id: UUID,
+        seller_id: UUID,
+        changes: dict[str, object],
+    ) -> Product:
+        stmt = select(Product).where(Product.id == product_id).options(selectinload(Product.skus))
+        product = (await self._session.execute(stmt)).scalar_one_or_none()
+        if product is None:
+            raise ProductNotFoundError("Товар не найден")
+        if product.seller_id != seller_id:
+            raise ProductNotOwnedError("Product does not belong to the authenticated seller")
+        if product.status == ProductStatus.HARD_BLOCKED:
+            raise ProductHardBlockedError("Cannot edit hard-blocked product")
+        if product.status == ProductStatus.DELETED:
+            raise ProductNotFoundError("Товар не найден")
+
+        if "category_id" in changes:
+            category_id = changes["category_id"]
+            if category_id is not None:
+                if not await self.category_exists(category_id):
+                    raise CategoryNotFoundError("Категория не найдена")
+                product.category_id = category_id
+
+        for field_name in ("title", "description", "characteristics"):
+            if field_name in changes and changes[field_name] is not None:
+                setattr(product, field_name, changes[field_name])
+
+        if product.status in {ProductStatus.MODERATED, ProductStatus.BLOCKED}:
+            product.status = ProductStatus.ON_MODERATION
+            product.blocking_reason_id = None
+            product.moderator_comment = None
+            self._session.add(_build_edit_outbox_event(product.id, product.seller_id))
+
+        await self._session.commit()
+        return product
+
+    async def update_sku(
+        self,
+        sku_id: UUID,
+        seller_id: UUID,
+        changes: dict[str, object],
+    ) -> SKU:
+        stmt = select(SKU).where(SKU.id == sku_id).options(selectinload(SKU.product))
+        sku = (await self._session.execute(stmt)).scalar_one_or_none()
+        if sku is None or sku.product is None:
+            raise SkuNotFoundError("SKU not found")
+        if sku.product.seller_id != seller_id:
+            raise SkuNotOwnedError("SKU does not belong to the authenticated seller")
+        if sku.product.status == ProductStatus.HARD_BLOCKED:
+            raise ProductHardBlockedError("Cannot edit hard-blocked product")
+        if sku.product.status == ProductStatus.DELETED:
+            raise SkuNotFoundError("SKU not found")
+
+        for field_name in (
+            "name",
+            "price",
+            "discount",
+            "cost_price",
+            "article",
+            "characteristics",
+        ):
+            if field_name in changes and changes[field_name] is not None:
+                setattr(sku, field_name, changes[field_name])
+
+        if sku.product.status in {ProductStatus.MODERATED, ProductStatus.BLOCKED}:
+            sku.product.status = ProductStatus.ON_MODERATION
+            sku.product.blocking_reason_id = None
+            sku.product.moderator_comment = None
+            self._session.add(_build_edit_outbox_event(sku.product.id, sku.product.seller_id))
+
+        await self._session.commit()
+        return sku
 
     async def list_products(
         self,
@@ -155,3 +234,21 @@ _ALLOWED_SORTS = {
     "date_desc": ("created_at", True),
     "discount_desc": ("created_at", True),
 }
+
+
+def _build_edit_outbox_event(product_id: UUID, seller_id: UUID) -> OutboxEvent:
+    now = datetime.now(UTC)
+    idempotency_key = uuid4()
+    return OutboxEvent(
+        event_type="EDITED",
+        aggregate_type="product",
+        aggregate_id=product_id,
+        idempotency_key=idempotency_key,
+        payload={
+            "idempotency_key": str(idempotency_key),
+            "product_id": str(product_id),
+            "seller_id": str(seller_id),
+            "event": "EDITED",
+            "date": now.isoformat(),
+        },
+    )
