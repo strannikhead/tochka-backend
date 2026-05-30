@@ -1,7 +1,7 @@
 """Add invoices and invoice_items
 
-Revision ID: 007_invoices
-Revises: 006_product_deleted_flag
+Revision ID: 008_invoices
+Revises: 007_processed_events_and_field_reports
 Create Date: 2026-05-31 00:00:00.000000
 
 """
@@ -13,8 +13,8 @@ from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
 
 # revision identifiers, used by Alembic.
-revision: str = "007_invoices"
-down_revision: str | None = "006_product_deleted_flag"
+revision: str = "008_invoices"
+down_revision: str | None = "007_processed_events_and_field_reports"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
