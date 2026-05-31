@@ -5,6 +5,12 @@ from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID, uuid4
 
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from b2b.src.auth import get_current_seller_id, get_optional_seller_id
 from b2b.src.db import get_session
 from b2b.src.models import SKU, Product
@@ -30,11 +36,6 @@ from b2b.src.public_catalog.domain.errors import (
 from b2b.src.public_catalog.domain.errors import (
     ProductNotFoundError as PublicProductNotFoundError,
 )
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/api/v1/products", tags=["products"])
 public_router = APIRouter(prefix="/api/v1/public", tags=["public-catalog"])
@@ -670,11 +671,11 @@ class BatchProductsRequest(BaseModel):
 async def list_public_products(
     service: Annotated[PublicCatalogService, Depends(get_public_catalog_service)],
     _: Annotated[None, Depends(require_service_key)],
-    category_id: UUID | None = Query(None),
+    category_id: UUID | None = Query(None),  # noqa: B008
     search: str | None = Query(None, min_length=3),
     min_price: int | None = Query(None, ge=0),
     max_price: int | None = Query(None, ge=0),
-    seller_id: UUID | None = Query(None),
+    seller_id: UUID | None = Query(None),  # noqa: B008
     sort: str = Query("created_desc"),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),

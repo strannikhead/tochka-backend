@@ -2,14 +2,15 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
 from b2b.src.models import SKU, Category, Product, ProductStatus
 from b2b.src.public_catalog.domain.errors import (
     CategoryNotFoundError,
     ProductNotFoundError,
 )
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 
 class PublicCatalogService:
