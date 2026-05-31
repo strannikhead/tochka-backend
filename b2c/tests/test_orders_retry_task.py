@@ -8,6 +8,7 @@ import pytest
 from src.orders.domain import OrderItemSnapshot, OrderSnapshot, OrderStatus
 from src.orders.repository import UpstreamServiceError
 from src.orders.retry_pending_cancellations import (
+    retry_fulfill_order_task,
     retry_pending_cancellations_once,
     retry_pending_cancellations_task,
 )
@@ -115,3 +116,10 @@ def test_celery_task_uses_exponential_backoff() -> None:
     assert retry_pending_cancellations_task.retry_backoff is True
     assert retry_pending_cancellations_task.retry_backoff_max == 60 * 60
     assert retry_pending_cancellations_task.retry_jitter is True
+
+
+def test_fulfill_retry_task_uses_exponential_backoff() -> None:
+    assert retry_fulfill_order_task.autoretry_for == (UpstreamServiceError,)
+    assert retry_fulfill_order_task.retry_backoff is True
+    assert retry_fulfill_order_task.retry_backoff_max == 60 * 60
+    assert retry_fulfill_order_task.retry_jitter is True
