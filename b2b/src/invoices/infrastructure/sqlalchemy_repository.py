@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
 from b2b.src.invoices.domain.errors import (
     EmptyInvoiceError,
     InvoiceSkuNotFoundError,
@@ -8,9 +12,6 @@ from b2b.src.invoices.domain.errors import (
 )
 from b2b.src.invoices.domain.models import CreateInvoiceCommand
 from b2b.src.models import SKU, Invoice, InvoiceItem, InvoiceStatus, ProductStatus
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 
 class SqlAlchemyInvoicesRepository:

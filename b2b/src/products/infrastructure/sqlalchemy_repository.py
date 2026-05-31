@@ -4,6 +4,11 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
+from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
 from b2b.src.models import (
     SKU,
     Category,
@@ -26,10 +31,6 @@ from b2b.src.products.domain.models import (
     ProductListItem,
     ProductListResponse,
 )
-from sqlalchemy import func, or_, select
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 
 class SqlAlchemyProductsRepository:

@@ -4,21 +4,22 @@ from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
-from b2b.src.config import get_settings
-from b2b.src.db import get_session
-from b2b.src.inventory.b2c_client import B2cClient
-from b2b.src.inventory.models import (
-    InventoryReservation,
-    InventoryReservationItem,
-    InventoryReservationStatus,
-)
-from b2b.src.models import SKU, Product, ProductStatus
 from fastapi import APIRouter, Depends, Header
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+
+from b2b.src.b2c_client import B2cClient
+from b2b.src.config import get_settings
+from b2b.src.db import get_session
+from b2b.src.inventory.models import (
+    InventoryReservation,
+    InventoryReservationItem,
+    InventoryReservationStatus,
+)
+from b2b.src.models import SKU, Product, ProductStatus
 
 router = APIRouter(prefix="/api/v1/inventory", tags=["inventory"])
 

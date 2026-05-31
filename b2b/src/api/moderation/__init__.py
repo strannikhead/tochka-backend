@@ -5,12 +5,13 @@ from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from b2b.src.products.application.service import ProductsService
-from b2b.src.products.dependencies import get_products_service
-from b2b.src.products.domain.models import FieldReportInput, ModerationDecision
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, ValidationError
+
+from b2b.src.products.application.service import ProductsService
+from b2b.src.products.dependencies import get_products_service
+from b2b.src.products.domain.models import FieldReportInput, ModerationDecision
 
 router = APIRouter(prefix="/api/v1/moderation", tags=["moderation-events"])
 
