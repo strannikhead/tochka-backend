@@ -379,6 +379,8 @@ def test__b2b_unavailable__returns_502(client: TestClient) -> None:
             limit: int,
             offset: int,
             search: str | None,
+            min_price: int | None = None,
+            max_price: int | None = None,
         ) -> object:
             raise UpstreamServiceError("B2B temporarily unavailable", None)
 

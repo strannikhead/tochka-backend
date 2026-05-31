@@ -29,6 +29,8 @@ async def list_products(
     category_id: str | None = Query(default=None),
     sort: Annotated[SortValue, Query()] = "popularity",
     q: str | None = Query(default=None),
+    min_price: int | None = Query(default=None, ge=0),
+    max_price: int | None = Query(default=None, ge=0),
 ) -> ProductShortListResponse | JSONResponse:
     category_uuid = None
     if category_id is not None:
@@ -66,6 +68,8 @@ async def list_products(
             limit=limit,
             offset=offset,
             search=search_for_repo,
+            min_price=min_price,
+            max_price=max_price,
         )
     except UpstreamServiceError as exc:
         status_code = 502 if exc.status_code is None else exc.status_code

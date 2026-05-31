@@ -22,6 +22,8 @@ class CatalogRepository(Protocol):
         limit: int,
         offset: int,
         search: str | None,
+        min_price: int | None = None,
+        max_price: int | None = None,
     ) -> ProductShortList: ...
 
     async def get_facets(
@@ -94,6 +96,8 @@ class InMemoryCatalogRepository:
         limit: int,
         offset: int,
         search: str | None,
+        min_price: int | None = None,
+        max_price: int | None = None,
     ) -> ProductShortList:
         if category_id is not None and category_id not in self._categories:
             raise UpstreamServiceError("Category not found", 404)
@@ -105,6 +109,7 @@ class InMemoryCatalogRepository:
             if _matches_category(product, category_id)
             and _matches_filters(product, filters)
             and _matches_search(product, search)
+            and _matches_price_range(product, min_price=min_price, max_price=max_price)
         ]
 
         sorted_products = _sort_products(filtered, sort)
@@ -185,6 +190,8 @@ class HttpCatalogRepository:
         limit: int,
         offset: int,
         search: str | None,
+        min_price: int | None = None,
+        max_price: int | None = None,
     ) -> ProductShortList:
         params = _build_product_params(
             category_id=category_id,
@@ -193,8 +200,10 @@ class HttpCatalogRepository:
             limit=limit,
             offset=offset,
             search=search,
+            min_price=min_price,
+            max_price=max_price,
         )
-        payload = await self._get("/api/v1/products", params)
+        payload = await self._get("/api/v1/public/products", params)
         return _parse_product_short_list(payload)
 
     async def get_facets(
@@ -301,17 +310,27 @@ def _matches_search(product: CatalogProduct, search: str | None) -> bool:
     return needle in title or needle in description
 
 
+def _matches_price_range(
+    product: CatalogProduct,
+    *,
+    min_price: int | None,
+    max_price: int | None,
+) -> bool:
+    return not (
+        (min_price is not None and product.price < min_price)
+        or (max_price is not None and product.price > max_price)
+    )
+
+
 def _sort_products(products: list[CatalogProduct], sort: str | None) -> list[CatalogProduct]:
-    sort_value = sort or "rating"
+    sort_value = sort or "popularity"
     key_map: dict[str, tuple[Callable[[CatalogProduct], Any], bool]] = {
-        "rating": (lambda product: product.rating, True),
         "popularity": (lambda product: product.popularity, True),
         "price_asc": (lambda product: product.price, False),
         "price_desc": (lambda product: product.price, True),
-        "date_desc": (lambda product: product.created_at, True),
-        "discount_desc": (lambda product: product.discount, True),
+        "new": (lambda product: product.created_at, True),
     }
-    key_func, reverse = key_map.get(sort_value, key_map["rating"])
+    key_func, reverse = key_map.get(sort_value, key_map["popularity"])
     return sorted(products, key=key_func, reverse=reverse)
 
 
@@ -339,18 +358,29 @@ def _build_product_params(
     limit: int,
     offset: int,
     search: str | None,
+    min_price: int | None,
+    max_price: int | None,
 ) -> list[tuple[str, str]]:
     params: list[tuple[str, str]] = [("limit", str(limit)), ("offset", str(offset))]
     if category_id is not None:
         params.append(("category_id", str(category_id)))
+    sort_mapping = {
+        "popularity": "popular",
+        "new": "created_desc",
+        "price_asc": "price_asc",
+        "price_desc": "price_desc",
+    }
     if sort:
-        params.append(("sort", sort))
+        params.append(("sort", sort_mapping.get(sort, sort)))
     if search:
-        # canonical param name is `q`
-        params.append(("q", search))
+        params.append(("search", search))
+    if min_price is not None:
+        params.append(("min_price", str(min_price)))
+    if max_price is not None:
+        params.append(("max_price", str(max_price)))
     for key, values in filters.items():
         for value in values:
-            params.append((f"filter[{key}]", str(value)))
+            params.append((f"filters[{key}]", str(value)))
     return params
 
 
@@ -377,12 +407,20 @@ def _parse_product_short_list(payload: dict[str, Any]) -> ProductShortList:
 
 
 def _parse_product_short(payload: dict[str, Any]) -> ProductShort:
+    images = payload.get("images") or []
+    image = ""
+    if isinstance(images, list) and images:
+        first_image = images[0]
+        if isinstance(first_image, dict):
+            image = str(first_image.get("url", ""))
+        else:
+            image = str(first_image)
     return ProductShort(
         id=UUID(payload["id"]),
-        title=str(payload.get("title", "")),
-        image=str(payload.get("image", "")),
-        price=int(payload.get("price", 0)),
-        in_stock=bool(payload.get("in_stock", False)),
+        title=str(payload.get("name") or payload.get("title") or ""),
+        image=str(payload.get("image") or image),
+        price=int(payload.get("min_price") or payload.get("price") or 0),
+        in_stock=bool(payload.get("has_stock") or payload.get("in_stock") or False),
         is_in_cart=bool(payload.get("is_in_cart", False)),
     )
 
