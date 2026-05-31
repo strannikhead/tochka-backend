@@ -1,4 +1,4 @@
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -17,15 +17,7 @@ from b2c.src.api.products.schemas import (
 from b2c.src.catalog.repository import CatalogRepository, UpstreamServiceError
 
 base = APIRouter()
-ALLOWED_SORTS = (
-    "rating",
-    "popularity",
-    "price_asc",
-    "price_desc",
-    "new",
-    "date_desc",
-    "discount_desc",
-)
+SortValue = Literal["price_asc", "price_desc", "popularity", "new"]
 
 
 @base.get("/", response_model=ProductShortListResponse, response_model_exclude_none=True)
@@ -35,7 +27,7 @@ async def list_products(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     category_id: str | None = Query(default=None),
-    sort: str | None = Query(default=None),
+    sort: Annotated[SortValue, Query()] = "popularity",
     q: str | None = Query(default=None),
 ) -> ProductShortListResponse | JSONResponse:
     category_uuid = None
@@ -44,14 +36,6 @@ async def list_products(
             category_uuid = UUID(category_id)
         except ValueError:
             return error_response(400, "INVALID_REQUEST", "Invalid category_id")
-
-    if sort is not None and sort not in ALLOWED_SORTS:
-        allowed = ", ".join(ALLOWED_SORTS)
-        return error_response(
-            400,
-            "INVALID_REQUEST",
-            f"Invalid sort parameter. Allowed values: {allowed}",
-        )
 
     search_value = q
 
@@ -98,15 +82,27 @@ async def get_product(
     try:
         parsed_id = UUID(product_id)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Некорректный id товара") from exc
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "INVALID_REQUEST", "message": "Некорректный id товара"},
+        ) from exc
 
     try:
         product = await service.get_product_card(parsed_id)
     except ProductUpstreamServiceError as exc:
         status_code = 502 if exc.status_code is None else exc.status_code
-        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status_code,
+            detail={
+                "code": "UPSTREAM_UNAVAILABLE",
+                "message": str(exc),
+            },
+        ) from exc
     if product is None:
-        raise HTTPException(status_code=404, detail="Товар не найден")
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "NOT_FOUND", "message": "Товар не найден"},
+        )
 
     return CatalogProductDetailResponse.from_domain(product)
 

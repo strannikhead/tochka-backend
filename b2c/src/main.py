@@ -1,3 +1,5 @@
+from typing import Any
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -63,6 +65,17 @@ def _http_exception_code(status_code: int) -> str:
     return "HTTP_ERROR"
 
 
+def _http_exception_details(status_code: int, detail: Any) -> tuple[str, str]:
+    if isinstance(detail, dict):
+        code = detail.get("code")
+        message = detail.get("message")
+
+        if isinstance(code, str) and isinstance(message, str):
+            return code, message
+
+    return _http_exception_code(status_code), str(detail)
+
+
 @app.exception_handler(RequestValidationError)
 async def request_validation_exception_handler(
     _: Request, __: RequestValidationError
@@ -72,10 +85,12 @@ async def request_validation_exception_handler(
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(_: Request, exc: HTTPException) -> JSONResponse:
+    code, message = _http_exception_details(exc.status_code, exc.detail)
+
     return error_response(
         exc.status_code,
-        code=_http_exception_code(exc.status_code),
-        message=str(exc.detail),
+        code=code,
+        message=message,
     )
 
 

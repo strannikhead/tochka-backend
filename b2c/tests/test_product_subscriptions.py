@@ -186,7 +186,10 @@ def test__subscribe_to_unknown_product_returns_404(client: TestClient) -> None:
     )
 
     assert response.status_code == 404
-    assert response.json()["code"] == "NOT_FOUND"
+    assert response.json() == {
+        "code": "PRODUCT_NOT_FOUND",
+        "message": "Товар с указанным идентификатором не найден",
+    }
     assert repository._subscriptions == {}
 
 

@@ -333,15 +333,27 @@ def test__facets_return__counts_per_filter_value(client: TestClient) -> None:
     assert color_values == {"Black": 2, "White": 1}
 
 
-def test__invalid_sort__returns_400(client: TestClient) -> None:
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"sort": "unknown"},
+        {"limit": 0},
+    ],
+)
+def test__invalid_query_params__returns_422(
+    client: TestClient,
+    params: dict,
+) -> None:
     repository = InMemoryCatalogRepository(products=[], categories={CATEGORY_ID})
     override_repository(repository)
 
-    response = client.get("/api/v1/catalog/products", params={"sort": "unknown"})
+    response = client.get("/api/v1/catalog/products", params=params)
 
-    assert response.status_code == 400
-    assert response.json()["code"] == "INVALID_REQUEST"
-    assert "Invalid sort parameter" in response.json()["message"]
+    assert response.status_code == 422
+    assert response.json() == {
+        "code": "VALIDATION_ERROR",
+        "message": "Некорректный запрос",
+    }
 
 
 def test__invalid_category_id__returns_400(client: TestClient) -> None:
