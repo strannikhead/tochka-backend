@@ -41,9 +41,7 @@ async def validation_exception_handler(
 
 
 @app.exception_handler(StarletteHTTPException)
-async def http_exception_handler(
-    request: Request, exc: StarletteHTTPException
-) -> JSONResponse:
+async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
     # Normalize every HTTPException to the OpenAPI `Error` schema ({code, message,
     # details?}) instead of FastAPI's default {detail: ...}. Handlers that already raise
     # a dict detail with code+message (e.g. auth) are passed through unchanged.
