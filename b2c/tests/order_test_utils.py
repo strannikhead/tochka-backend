@@ -138,6 +138,22 @@ class LiveCheckoutCatalogClient:
 
         response.raise_for_status()
 
+    async def fulfill(self, *, order_id, items):
+        transport = httpx.ASGITransport(app=b2b_app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://b2b") as client:
+            response = await client.post(
+                "/api/v1/inventory/fulfill",
+                json={
+                    "order_id": str(order_id),
+                    "items": [
+                        {"sku_id": str(item.sku_id), "quantity": item.quantity} for item in items
+                    ],
+                },
+                headers={"X-Service-Key": "dev-service-key"},
+            )
+
+        response.raise_for_status()
+
 
 def build_sku(
     *,

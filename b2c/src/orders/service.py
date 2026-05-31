@@ -173,6 +173,41 @@ class CheckoutService:
             raise RuntimeError("Order disappeared while marking CANCELLED")
         return cancelled_order
 
+    async def mark_order_delivered(self, *, order_id: UUID) -> OrderSnapshot | None:
+        order = await self._repository.get_by_id(order_id)
+        if order is None:
+            return None
+
+        updated_order = await self._repository.update_status(
+            order_id=order.id,
+            status=OrderStatus.DELIVERED.value,
+        )
+        if updated_order is None:
+            raise RuntimeError("Order disappeared while marking DELIVERED")
+
+        if order.status == OrderStatus.DELIVERED:
+            return updated_order
+
+        try:
+            await self._fulfill_order(updated_order)
+        except UpstreamServiceError:
+            logger.exception(
+                "Failed to fulfill delivered order %s, scheduling async retry",
+                updated_order.id,
+            )
+            enqueue_fulfill_retry(updated_order.id)
+
+        return updated_order
+
+    async def _fulfill_order(self, order: OrderSnapshot) -> None:
+        await self._catalog_client.fulfill(
+            order_id=order.id,
+            items=[
+                ReserveRequestItem(sku_id=item.sku_id, quantity=item.quantity)
+                for item in order.items
+            ],
+        )
+
     async def _get_lock(self, idempotency_key: UUID) -> asyncio.Lock:
         async with self._lock_guard:
             lock = self._locks.get(idempotency_key)
@@ -180,6 +215,15 @@ class CheckoutService:
                 lock = asyncio.Lock()
                 self._locks[idempotency_key] = lock
             return lock
+
+
+def enqueue_fulfill_retry(order_id: UUID) -> None:
+    try:
+        from src.orders.retry_pending_cancellations import retry_fulfill_order_task
+
+        retry_fulfill_order_task.delay(str(order_id))
+    except Exception:
+        logger.exception("Failed to enqueue fulfill retry for order %s", order_id)
 
 
 def _validate_items(

@@ -31,6 +31,8 @@ class OrdersRepository(Protocol):
 
     async def get_for_user(self, *, order_id: UUID, user_id: UUID) -> OrderSnapshot | None: ...
 
+    async def get_by_id(self, order_id: UUID) -> OrderSnapshot | None: ...
+
     async def list_by_status(
         self,
         *,
@@ -79,6 +81,13 @@ class CheckoutCatalogClient(Protocol):
         items: list[ReserveRequestItem],
     ) -> None: ...
 
+    async def fulfill(
+        self,
+        *,
+        order_id: UUID,
+        items: list[ReserveRequestItem],
+    ) -> None: ...
+
 
 class UpstreamServiceError(RuntimeError):
     def __init__(self, message: str, status_code: int | None = None) -> None:
@@ -110,6 +119,12 @@ class SqlAlchemyOrdersRepository:
             .limit(1)
         )
         row = (await self._session.execute(stmt)).scalar_one_or_none()
+        if row is None:
+            return None
+        return _order_row_to_snapshot(row)
+
+    async def get_by_id(self, order_id: UUID) -> OrderSnapshot | None:
+        row = await self._load_row(order_id=order_id)
         if row is None:
             return None
         return _order_row_to_snapshot(row)
@@ -287,7 +302,9 @@ class HttpCheckoutCatalogClient:
             "idempotency_key": str(idempotency_key),
             "items": [{"sku_id": str(item.sku_id), "quantity": item.quantity} for item in items],
         }
-        response_payload = await self._post("/api/v1/inventory/reserve", payload)
+        response_payload = await self._post(
+            "/api/v1/inventory/reserve", payload, expected_statuses={200, 409}
+        )
         reserved = bool(response_payload.get("reserved"))
         failed_items = tuple(
             _parse_failed_item(item) for item in response_payload.get("failed_items", []) or []
@@ -304,7 +321,23 @@ class HttpCheckoutCatalogClient:
             "order_id": str(order_id),
             "items": [{"sku_id": str(item.sku_id), "quantity": item.quantity} for item in items],
         }
-        await self._post("/api/v1/inventory/unreserve", payload)
+        await self._post("/api/v1/inventory/unreserve", payload, expected_statuses={200})
+
+    async def fulfill(
+        self,
+        *,
+        order_id: UUID,
+        items: list[ReserveRequestItem],
+    ) -> None:
+        payload = {
+            "order_id": str(order_id),
+            "items": [{"sku_id": str(item.sku_id), "quantity": item.quantity} for item in items],
+        }
+        response_payload = await self._post(
+            "/api/v1/inventory/fulfill", payload, expected_statuses={200}
+        )
+        if response_payload.get("status") != "FULFILLED":
+            raise UpstreamServiceError("Unexpected upstream response", 502)
 
     async def _get(self, path: str, params: list[tuple[str, str]]) -> dict[str, Any]:
         url = f"{self._base_url}{path}"
@@ -323,7 +356,13 @@ class HttpCheckoutCatalogClient:
             raise UpstreamServiceError("Unexpected upstream response", response.status_code)
         return response.json()
 
-    async def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    async def _post(
+        self,
+        path: str,
+        payload: dict[str, Any],
+        *,
+        expected_statuses: set[int],
+    ) -> dict[str, Any]:
         url = f"{self._base_url}{path}"
         headers = {"Content-Type": "application/json"}
         if self._service_key:
@@ -334,9 +373,9 @@ class HttpCheckoutCatalogClient:
         except httpx.RequestError as exc:
             raise UpstreamServiceError("B2B temporarily unavailable", None) from exc
 
-        if response.status_code in {502, 503}:
+        if response.status_code in {502, 503, 504}:
             raise UpstreamServiceError("B2B temporarily unavailable", response.status_code)
-        if response.status_code not in {200, 409}:
+        if response.status_code not in expected_statuses:
             raise UpstreamServiceError("Unexpected upstream response", response.status_code)
         payload = response.json()
         if not isinstance(payload, dict):
