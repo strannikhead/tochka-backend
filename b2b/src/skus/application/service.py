@@ -4,11 +4,12 @@ import logging
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from b2b.src.models import SKU, OutboxEvent, OutboxStatus, Product, ProductStatus
 from b2b.src.skus.domain.errors import ProductHardBlockedError, ProductNotFoundError
 from b2b.src.skus.infrastructure.moderation_client import ModerationClient
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 

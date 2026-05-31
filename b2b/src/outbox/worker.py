@@ -5,10 +5,11 @@ from datetime import UTC, datetime
 
 import aio_pika
 from aio_pika import ExchangeType
-from b2b.src.db import SessionLocal
-from b2b.src.models import OutboxEvent
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from b2b.src.db import SessionLocal
+from b2b.src.models import OutboxEvent
 
 RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://rabbitmq:5672/")
 POLL_INTERVAL = float(os.getenv("OUTBOX_POLL_INTERVAL", "1.0"))

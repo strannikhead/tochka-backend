@@ -3,14 +3,15 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
+from fastapi import APIRouter, Depends, Header, Query
+from fastapi.responses import JSONResponse
+
 from b2b.src.public_catalog.application.service import PublicCatalogService
 from b2b.src.public_catalog.dependencies import get_public_catalog_service
 from b2b.src.public_catalog.domain.errors import (
     CategoryNotFoundError,
     ProductNotFoundError,
 )
-from fastapi import APIRouter, Depends, Header, Query
-from fastapi.responses import JSONResponse
 
 router = APIRouter(prefix="/api/v1/public/products", tags=["public-catalog"])
 

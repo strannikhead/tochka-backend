@@ -3,16 +3,17 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID, uuid4
 
+from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field, field_validator
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from b2b.src.auth import get_current_seller_id
 from b2b.src.config import get_settings
 from b2b.src.db import get_session
 from b2b.src.skus.application.service import SkuService
 from b2b.src.skus.domain.errors import ProductHardBlockedError, ProductNotFoundError
 from b2b.src.skus.infrastructure.moderation_client import ModerationClient
-from fastapi import APIRouter, Depends
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, field_validator
-from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/api/v1/skus", tags=["skus"])
 

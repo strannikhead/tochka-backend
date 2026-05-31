@@ -1,10 +1,11 @@
-from b2b.src.api import categories, inventory, invoices, moderation, products, skus
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from b2b.src.api import categories, inventory, invoices, moderation, products, skus
 
 app = FastAPI(title="B2B Seller Cabinet")
 

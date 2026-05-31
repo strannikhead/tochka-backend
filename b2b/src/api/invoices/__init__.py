@@ -3,6 +3,10 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
+from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field
+
 from b2b.src.auth import get_current_seller_id
 from b2b.src.invoices.application.service import InvoicesService
 from b2b.src.invoices.dependencies import get_invoices_service
@@ -14,9 +18,6 @@ from b2b.src.invoices.domain.errors import (
 )
 from b2b.src.invoices.domain.models import CreateInvoiceCommand, InvoiceItemInput
 from b2b.src.models import Invoice
-from fastapi import APIRouter, Depends
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
 
 router = APIRouter(prefix="/api/v1/invoices", tags=["invoices"])
 
