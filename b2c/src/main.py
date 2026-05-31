@@ -45,33 +45,38 @@ if hasattr(home, "legacy_router"):
     app.include_router(home.legacy_router)
 
 
-@app.exception_handler(HTTPException)
-async def http_exception_handler(_: Request, exc: HTTPException) -> JSONResponse:
-    if isinstance(exc.detail, dict) and "code" in exc.detail and "message" in exc.detail:
-        return error_response(
-            exc.status_code,
-            str(exc.detail["code"]),
-            str(exc.detail["message"]),
-        )
-    if exc.status_code == 401:
-        code = "UNAUTHORIZED"
-    elif exc.status_code == 404:
-        code = "NOT_FOUND"
-    elif exc.status_code in {400, 422}:
-        code = "INVALID_REQUEST"
-    elif exc.status_code in {502, 503}:
-        code = "UPSTREAM_UNAVAILABLE"
-    else:
-        code = "HTTP_ERROR"
-    return error_response(exc.status_code, code, str(exc.detail))
+def _http_exception_code(status_code: int) -> str:
+    if status_code == 400:
+        return "INVALID_REQUEST"
+    if status_code == 401:
+        return "UNAUTHORIZED"
+    if status_code == 403:
+        return "FORBIDDEN"
+    if status_code == 404:
+        return "NOT_FOUND"
+    if status_code == 409:
+        return "CONFLICT"
+    if status_code == 422:
+        return "VALIDATION_ERROR"
+    if status_code >= 500:
+        return "INTERNAL_ERROR"
+    return "HTTP_ERROR"
 
 
 @app.exception_handler(RequestValidationError)
 async def request_validation_exception_handler(
-    _: Request, exc: RequestValidationError
+    _: Request, __: RequestValidationError
 ) -> JSONResponse:
-    message = exc.errors()[0]["msg"] if exc.errors() else "Invalid request"
-    return error_response(422, "INVALID_REQUEST", message)
+    return error_response(422, code="VALIDATION_ERROR", message="Некорректный запрос")
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(_: Request, exc: HTTPException) -> JSONResponse:
+    return error_response(
+        exc.status_code,
+        code=_http_exception_code(exc.status_code),
+        message=str(exc.detail),
+    )
 
 
 @app.exception_handler(Exception)

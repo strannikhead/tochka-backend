@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from uuid import UUID
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from src.api.dependencies import get_current_user_id
 from src.main import app
 from src.orders.db_models import Order as B2COrder
 from src.orders.db_models import OrderStatus as B2COrderStatus
+from starlette.requests import Request
 from tests.order_test_utils import (
     OTHER_USER_ID,
     TEST_USER_ID,
@@ -69,6 +72,36 @@ def test_orders_list_requires_auth(client: TestClient) -> None:
 
     assert response.status_code == 401
     assert response.json() == {"code": "UNAUTHORIZED", "message": "Требуется авторизация"}
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "/api/v1/orders?status=NOT_A_STATUS",
+        "/api/v1/orders?limit=0",
+        "/api/v1/orders?offset=-1",
+    ],
+)
+def test_orders_list_invalid_query_returns_validation_error(client: TestClient, url: str) -> None:
+    _set_current_user(TEST_USER_ID)
+    response = client.get(url)
+
+    assert response.status_code == 422
+    assert response.json() == {"code": "VALIDATION_ERROR", "message": "Некорректный запрос"}
+
+
+def test_http_exception_handler_includes_code() -> None:
+    handler = app.exception_handlers[HTTPException]
+    request = Request(
+        {"type": "http", "method": "GET", "path": "/", "headers": [], "query_string": b""}
+    )
+
+    response = asyncio.run(
+        handler(request, HTTPException(status_code=404, detail="Товар не найден"))
+    )
+
+    assert response.status_code == 404
+    assert json.loads(response.body) == {"code": "NOT_FOUND", "message": "Товар не найден"}
 
 
 def test_orders_list_returns_own_orders_paginated(client: TestClient) -> None:
