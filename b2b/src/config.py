@@ -9,8 +9,14 @@ class ModerationServiceConfig(BaseModel):
     service_key: str = "dev-b2b-to-mod-key"
 
 
+class B2cServiceConfig(BaseModel):
+    url: str = "http://b2c:8000"
+    service_key: str = "dev-b2b-to-b2c-key"
+
+
 class ApplicationSettings(BaseSettings):
     moderation: ModerationServiceConfig = ModerationServiceConfig()
+    b2c: B2cServiceConfig = B2cServiceConfig()
     model_config = SettingsConfigDict(env_nested_delimiter="__")
 
 

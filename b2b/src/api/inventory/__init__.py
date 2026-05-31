@@ -4,7 +4,9 @@ from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
+from b2b.src.config import get_settings
 from b2b.src.db import get_session
+from b2b.src.inventory.b2c_client import B2cClient
 from b2b.src.inventory.models import (
     InventoryReservation,
     InventoryReservationItem,
@@ -35,6 +37,11 @@ class ReserveRequest(BaseModel):
 class UnreserveRequest(BaseModel):
     order_id: UUID
     items: list[InventoryItemRequest]
+
+
+def _get_b2c_client() -> B2cClient:
+    settings = get_settings()
+    return B2cClient(base_url=settings.b2c.url, service_key=settings.b2c.service_key)
 
 
 @router.post("/reserve")
@@ -72,8 +79,10 @@ async def reserve_inventory(
             },
         )
 
-    sku_ids = [item.sku_id for item in request.items]
-    stmt = select(SKU).where(SKU.id.in_(sku_ids))
+    # Lock rows in consistent order (by id) to prevent deadlocks under concurrency.
+    sorted_sku_ids = sorted(request.items, key=lambda i: i.sku_id)
+    sku_ids = [item.sku_id for item in sorted_sku_ids]
+    stmt = select(SKU).where(SKU.id.in_(sku_ids)).order_by(SKU.id).with_for_update()
     rows = (await session.execute(stmt)).scalars().all()
     by_id = {row.id: row for row in rows}
 
@@ -131,9 +140,14 @@ async def reserve_inventory(
             },
         )
 
+    # All-or-nothing: update both quantities atomically.
+    out_of_stock_skus: list[SKU] = []
     for item in request.items:
         sku = by_id[item.sku_id]
         sku.active_quantity -= item.quantity
+        sku.reserved_quantity += item.quantity
+        if sku.active_quantity == 0:
+            out_of_stock_skus.append(sku)
 
     reservation = InventoryReservation(
         order_id=request.order_id,
@@ -152,6 +166,16 @@ async def reserve_inventory(
     ]
     session.add(reservation)
     await session.commit()
+
+    # Fire-and-forget: notify B2C for each SKU that just ran out of stock.
+    if out_of_stock_skus:
+        b2c = _get_b2c_client()
+        for sku in out_of_stock_skus:
+            await b2c.send_sku_out_of_stock(
+                sku_id=sku.id,
+                product_id=sku.product_id,
+                available_quantity=0,
+            )
 
     return JSONResponse(
         status_code=200,
@@ -223,6 +247,7 @@ async def unreserve_inventory(
         if sku is None:
             continue
         sku.active_quantity += item.requested
+        sku.reserved_quantity -= item.requested
 
     reservation.status = InventoryReservationStatus.UNRESERVED
     reservation.processed_at = processed_at
