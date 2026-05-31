@@ -1,14 +1,19 @@
 import asyncio
 import os
+import sys
 from logging.config import fileConfig
 
-from alembic import context
-from sqlalchemy import pool
-from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import async_engine_from_config
+# Make `b2b` importable when alembic is run from the b2b/ subdirectory.
+_repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
 
-# Import your models here
-from src.models import Base
+import b2b.src.inventory.models  # noqa: E402, F401
+from alembic import context  # noqa: E402
+from b2b.src.models import Base  # noqa: E402
+from sqlalchemy import pool  # noqa: E402
+from sqlalchemy.engine import Connection  # noqa: E402
+from sqlalchemy.ext.asyncio import async_engine_from_config  # noqa: E402
 
 # Alembic Config object
 config = context.config

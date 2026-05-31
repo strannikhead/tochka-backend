@@ -21,15 +21,11 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     # Product: blocking metadata set by Moderation Service on BLOCKED.
-    op.add_column(
-        "products", sa.Column("blocking_reason_id", UUID(as_uuid=True), nullable=True)
-    )
+    op.add_column("products", sa.Column("blocking_reason_id", UUID(as_uuid=True), nullable=True))
     op.add_column("products", sa.Column("moderator_comment", sa.Text(), nullable=True))
 
     # SKU: seller-view economics. cost_price / reserved_quantity stay seller-only.
-    op.add_column(
-        "skus", sa.Column("discount", sa.Integer(), nullable=False, server_default="0")
-    )
+    op.add_column("skus", sa.Column("discount", sa.Integer(), nullable=False, server_default="0"))
     op.add_column("skus", sa.Column("cost_price", sa.Integer(), nullable=True))
     op.add_column(
         "skus", sa.Column("stock_quantity", sa.Integer(), nullable=False, server_default="0")

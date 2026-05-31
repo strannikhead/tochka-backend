@@ -15,6 +15,7 @@ from b2b.src.b2c_client import B2cClient
 from b2b.src.config import get_settings
 from b2b.src.db import get_session
 from b2b.src.inventory.models import (
+    FulfilledOrder,
     InventoryReservation,
     InventoryReservationItem,
     InventoryReservationStatus,
@@ -259,6 +260,88 @@ async def unreserve_inventory(
         content={
             "order_id": str(reservation.order_id),
             "status": "UNRESERVED",
+            "processed_at": processed_at.isoformat().replace("+00:00", "Z"),
+        },
+    )
+
+
+class FulfillRequest(BaseModel):
+    order_id: UUID
+    items: list[InventoryItemRequest]
+
+
+@router.post("/fulfill")
+async def fulfill_inventory(
+    payload: dict,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    x_service_key: str | None = Header(default=None, alias="X-Service-Key"),
+) -> JSONResponse:
+    try:
+        request = FulfillRequest.model_validate(payload)
+    except ValidationError:
+        return JSONResponse(
+            status_code=400,
+            content={"code": "INVALID_REQUEST", "message": "Invalid fulfill payload"},
+        )
+
+    if x_service_key is None:
+        return JSONResponse(
+            status_code=401, content={"code": "UNAUTHORIZED", "message": "Missing service key"}
+        )
+
+    # Idempotency: if this order was already fulfilled, return cached result.
+    existing_stmt = (
+        select(FulfilledOrder).where(FulfilledOrder.order_id == request.order_id).limit(1)
+    )
+    existing = (await session.execute(existing_stmt)).scalar_one_or_none()
+    if existing is not None:
+        return JSONResponse(
+            status_code=200,
+            content={
+                "order_id": str(existing.order_id),
+                "status": "FULFILLED",
+                "processed_at": existing.fulfilled_at.isoformat().replace("+00:00", "Z"),
+            },
+        )
+
+    # Lock rows in consistent order to prevent deadlocks under concurrency.
+    sorted_items = sorted(request.items, key=lambda i: i.sku_id)
+    sku_ids = [item.sku_id for item in sorted_items]
+    stmt = select(SKU).where(SKU.id.in_(sku_ids)).order_by(SKU.id).with_for_update()
+    rows = (await session.execute(stmt)).scalars().all()
+    by_id = {row.id: row for row in rows}
+
+    for item in request.items:
+        if item.sku_id not in by_id:
+            return JSONResponse(
+                status_code=404,
+                content={"code": "SKU_NOT_FOUND", "message": f"SKU {item.sku_id} not found"},
+            )
+        sku = by_id[item.sku_id]
+        if sku.reserved_quantity < item.quantity:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "code": "FULFILL_FAILED",
+                    "message": f"SKU {item.sku_id} has insufficient reserved quantity",
+                },
+            )
+
+    processed_at = datetime.now(UTC)
+    for item in request.items:
+        sku = by_id[item.sku_id]
+        sku.reserved_quantity -= item.quantity
+        sku.stock_quantity -= item.quantity
+
+    fulfilled = FulfilledOrder(order_id=request.order_id, fulfilled_at=processed_at)
+    session.add(fulfilled)
+    await session.commit()
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            "order_id": str(request.order_id),
+            "status": "FULFILLED",
             "processed_at": processed_at.isoformat().replace("+00:00", "Z"),
         },
     )

@@ -57,3 +57,14 @@ class InventoryReservationItem(Base):
     reservation: Mapped[InventoryReservation] = relationship(
         "InventoryReservation", back_populates="items"
     )
+
+
+class FulfilledOrder(Base):
+    __tablename__ = "fulfilled_orders"
+    __table_args__ = (UniqueConstraint("order_id", name="uq_fulfilled_orders_order_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    order_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    fulfilled_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
