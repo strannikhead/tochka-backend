@@ -6,7 +6,7 @@ from uuid import UUID
 
 from b2b.src.config import get_settings
 from b2b.src.db import get_session
-from b2b.src.inventory.b2c_client import B2cClient
+from b2b.src.b2c_client import B2cClient
 from b2b.src.inventory.models import (
     InventoryReservation,
     InventoryReservationItem,

@@ -18,7 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from b2b.src.inventory.b2c_client import B2cClient
+from b2b.src.b2c_client import B2cClient
 from b2b.src.inventory.models import InventoryReservation
 from b2b.src.main import app
 from b2b.src.models import SKU, Category, Product, ProductStatus

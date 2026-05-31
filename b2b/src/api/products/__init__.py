@@ -632,20 +632,81 @@ def _require_service_key(service_key: str | None) -> None:
         raise HTTPException(status_code=401, detail="Invalid service key")
 
 
+def require_service_key(
+    x_service_key: str | None = Header(None, alias="X-Service-Key"),
+) -> None:
+    if x_service_key != SERVICE_KEY:
+        raise HTTPException(
+            status_code=401,
+            detail={"code": "UNAUTHORIZED", "message": "Требуется X-Service-Key"},
+        )
+
+
+def _extract_cover_image(images: list | None) -> str | None:
+    if not images:
+        return None
+    first = images[0]
+    return str(first.get("url")) if isinstance(first, dict) else str(first)
+
+
+def _product_to_public_short_dict(product: Product, min_price_val: int) -> dict[str, object]:
+    return {
+        "id": str(product.id),
+        "title": product.title,
+        "slug": product.slug if product.slug is not None else str(product.id),
+        "status": product.status.value,
+        "category_id": str(product.category_id),
+        "min_price": min_price_val,
+        "cover_image": _extract_cover_image(product.images),
+        "created_at": product.created_at.isoformat(),
+    }
+
+
+class BatchProductsRequest(BaseModel):
+    product_ids: list[UUID] = Field(max_length=100)
+
+
 @public_router.get("/products")
 async def list_public_products(
-    x_service_key: str | None = Header(None, alias="X-Service-Key"),
+    service: Annotated[PublicCatalogService, Depends(get_public_catalog_service)],
+    _: Annotated[None, Depends(require_service_key)],
+    category_id: UUID | None = Query(None),
+    search: str | None = Query(None, min_length=3),
+    min_price: int | None = Query(None, ge=0),
+    max_price: int | None = Query(None, ge=0),
+    seller_id: UUID | None = Query(None),
+    sort: str = Query("created_desc"),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
 ) -> JSONResponse:
-    _require_service_key(x_service_key)
-    product = _build_product_short_payload("770e8400-e29b-41d4-a716-446655440002")
+    rows, total = await service.list_catalog(
+        category_id=category_id,
+        search=search,
+        min_price=min_price,
+        max_price=max_price,
+        seller_id=seller_id,
+        sort=sort,
+        limit=limit,
+        offset=offset,
+    )
     return JSONResponse(
         content={
-            "items": [product],
-            "total_count": 1,
-            "limit": 1,
-            "offset": 0,
+            "items": [_product_to_public_short_dict(p, mp) for p, mp in rows],
+            "total_count": total,
+            "limit": limit,
+            "offset": offset,
         }
     )
+
+
+@public_router.post("/products/batch")
+async def batch_public_products(
+    body: BatchProductsRequest,
+    service: Annotated[PublicCatalogService, Depends(get_public_catalog_service)],
+    _: Annotated[None, Depends(require_service_key)],
+) -> JSONResponse:
+    products = await service.get_batch(body.product_ids)
+    return JSONResponse(content=[_serialize_product_public(p) for p in products])
 
 
 @public_router.get("/products/{product_id}")

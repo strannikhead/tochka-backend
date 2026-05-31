@@ -9,11 +9,92 @@ from b2b.src.public_catalog.domain.errors import (
 )
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 
 class PublicCatalogService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def list_catalog(
+        self,
+        *,
+        category_id: UUID | None = None,
+        search: str | None = None,
+        min_price: int | None = None,
+        max_price: int | None = None,
+        seller_id: UUID | None = None,
+        sort: str = "created_desc",
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[list[tuple[Product, int]], int]:
+        min_price_agg = func.min(SKU.price)
+
+        stmt = (
+            select(Product, min_price_agg.label("min_price"))
+            .join(SKU, SKU.product_id == Product.id)
+            .where(
+                Product.status == ProductStatus.MODERATED,
+                Product.deleted.is_(False),
+                SKU.active_quantity > 0,
+            )
+            .group_by(Product.id)
+        )
+
+        if category_id is not None:
+            stmt = stmt.where(Product.category_id == category_id)
+        if seller_id is not None:
+            stmt = stmt.where(Product.seller_id == seller_id)
+        if search is not None:
+            stmt = stmt.where(Product.title.ilike(f"%{search}%"))
+        if min_price is not None:
+            stmt = stmt.having(min_price_agg >= min_price)
+        if max_price is not None:
+            stmt = stmt.having(min_price_agg <= max_price)
+
+        total: int = (
+            await self.session.execute(
+                select(func.count()).select_from(stmt.subquery())
+            )
+        ).scalar_one()
+
+        if sort == "price_asc":
+            order_col = min_price_agg.asc()
+        elif sort == "price_desc":
+            order_col = min_price_agg.desc()
+        else:
+            order_col = Product.created_at.desc()
+
+        rows = (
+            await self.session.execute(
+                stmt.order_by(order_col).limit(limit).offset(offset)
+            )
+        ).all()
+
+        return [(row[0], int(row[1] or 0)) for row in rows], total
+
+    async def get_batch(self, product_ids: list[UUID]) -> list[Product]:
+        if not product_ids:
+            return []
+
+        has_active_sku = (
+            select(SKU.id)
+            .where(SKU.product_id == Product.id)
+            .where(SKU.active_quantity > 0)
+            .correlate(Product)
+        ).exists()
+
+        stmt = (
+            select(Product)
+            .options(selectinload(Product.skus))
+            .where(
+                Product.id.in_(product_ids),
+                Product.status == ProductStatus.MODERATED,
+                Product.deleted.is_(False),
+                has_active_sku,
+            )
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
 
     async def get_similar(self, product_id: UUID, limit: int) -> list[dict[str, object]]:
         product = await self.session.get(Product, product_id)
