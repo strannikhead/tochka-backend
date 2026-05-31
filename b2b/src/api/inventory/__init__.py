@@ -138,7 +138,7 @@ async def reserve_inventory(
             content={
                 "code": "RESERVE_FAILED",
                 "message": "Не удалось зарезервировать товары",
-                "failed_items": failed_items,
+                "details": {"failed_items": failed_items},
             },
         )
 
