@@ -354,7 +354,7 @@ paths:
             application/json:
               schema:
                 oneOf:
-                  - $ref: "#/components/schemas/ProductResponse"
+                  - $ref: "#/components/schemas/ProductDetailResponse"
                   - $ref: "#/components/schemas/ProductPublicResponse"
         "404": { $ref: "#/components/responses/NotFound" }
     patch:
@@ -1323,6 +1323,63 @@ components:
         deleted: { type: boolean }
         blocking_reason_id: { type: string, format: uuid, nullable: true }
         moderator_comment: { type: string, nullable: true }
+        images:
+          type: array
+          items: { $ref: "#/components/schemas/ProductImageResponse" }
+        characteristics:
+          type: array
+          items: { $ref: "#/components/schemas/CharacteristicResponse" }
+        skus:
+          type: array
+          items: { $ref: "#/components/schemas/SKUResponse" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    BlockingReason:
+      type: object
+      required: [id, title, comment]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        comment: { type: string }
+
+    ProductDetailResponse:
+      type: object
+      description: Полный seller-view карточки с детализацией блокировки (без плоских legacy-полей).
+      required:
+        - id
+        - seller_id
+        - category_id
+        - title
+        - slug
+        - description
+        - status
+        - deleted
+        - images
+        - characteristics
+        - skus
+        - created_at
+        - updated_at
+        - blocked
+        - blocking_reason
+        - field_reports
+      properties:
+        id: { type: string, format: uuid }
+        seller_id: { type: string, format: uuid }
+        category_id: { type: string, format: uuid }
+        title: { type: string }
+        slug: { type: string }
+        description: { type: string }
+        status: { $ref: "#/components/schemas/ProductStatus" }
+        deleted: { type: boolean }
+        blocked: { type: boolean }
+        blocking_reason:
+          allOf:
+            - $ref: "#/components/schemas/BlockingReason"
+          nullable: true
+        field_reports:
+          type: array
+          items: { $ref: "#/components/schemas/FieldReport" }
         images:
           type: array
           items: { $ref: "#/components/schemas/ProductImageResponse" }

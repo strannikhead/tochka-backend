@@ -63,7 +63,11 @@ def _make_product(*, status: ProductStatus, seller_id: UUID = SELLER_ID) -> Prod
         images=[{"id": str(uuid4()), "url": "/s3/cover.jpg", "ordering": 0}],
         characteristics=[{"id": str(uuid4()), "name": "Бренд", "value": "Apple"}],
         blocking_reason_id=BLOCKING_REASON_ID if blocked else None,
+        blocking_reason_title="Запрещённый товар" if blocked else None,
         moderator_comment="Некорректное название" if blocked else None,
+        field_reports=(
+            [{"field_name": "title", "comment": "Исправьте", "sku_id": None}] if blocked else []
+        ),
         created_at=now,
         updated_at=now,
     )
@@ -113,7 +117,11 @@ def test_get_moderated_product_returns_full_payload() -> None:
     payload = response.json()
     assert payload["id"] == str(product.id)
     assert payload["status"] == "MODERATED"
-    assert payload["blocking_reason_id"] is None
+    # ProductDetailResponse: nested blocking detail, not flat blocking_reason_id.
+    assert payload["blocked"] is False
+    assert payload["blocking_reason"] is None
+    assert payload["field_reports"] == []
+    assert "blocking_reason_id" not in payload
     # Seller view carries the sensitive economics on each SKU.
     sku = payload["skus"][0]
     assert sku["cost_price"] == 9990000
@@ -133,10 +141,19 @@ def test_get_blocked_product_returns_blocking_reason_and_field_reports() -> None
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "BLOCKED"
-    # Per OpenAPI the card carries blocking_reason_id + moderator_comment (no nested
-    # blocking_reason object, no field_reports array — those live on moderation events).
-    assert payload["blocking_reason_id"] == str(BLOCKING_REASON_ID)
-    assert payload["moderator_comment"] == "Некорректное название"
+    # ProductDetailResponse: blocked flag + nested blocking_reason {id, title, comment}
+    # + field_reports[]. No flat legacy blocking_reason_id / moderator_comment.
+    assert payload["blocked"] is True
+    assert payload["blocking_reason"] == {
+        "id": str(BLOCKING_REASON_ID),
+        "title": "Запрещённый товар",
+        "comment": "Некорректное название",
+    }
+    assert payload["field_reports"] == [
+        {"field_name": "title", "comment": "Исправьте", "sku_id": None}
+    ]
+    assert "blocking_reason_id" not in payload
+    assert "moderator_comment" not in payload
 
 
 def test_get_others_product_returns_404() -> None:

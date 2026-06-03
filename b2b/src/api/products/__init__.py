@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from b2b.src.auth import get_current_seller_id, get_optional_seller_id
 from b2b.src.db import get_session
-from b2b.src.models import SKU, Product
+from b2b.src.models import SKU, Product, ProductStatus
 from b2b.src.products.application.service import ProductsService
 from b2b.src.products.dependencies import get_products_service
 from b2b.src.products.domain.errors import (
@@ -476,6 +476,42 @@ def _serialize_product_seller(product: Product) -> dict[str, object]:
     }
 
 
+def _serialize_blocking_reason(product: Product) -> dict[str, object] | None:
+    # ProductDetailResponse.blocking_reason is the {id, title, comment} object, present
+    # only while the product is blocked. title comes from Moderation's reference dict
+    # (stored on the BLOCKED event); empty string until Moderation sends it.
+    if product.blocking_reason_id is None:
+        return None
+    return {
+        "id": str(product.blocking_reason_id),
+        "title": product.blocking_reason_title or "",
+        "comment": product.moderator_comment or "",
+    }
+
+
+def _serialize_product_detail(product: Product) -> dict[str, object]:
+    # Seller card (GET /products/{id}) -> ProductDetailResponse: blocking detail as a
+    # nested object + field_reports, instead of the flat legacy blocking_reason_id.
+    return {
+        "id": str(product.id),
+        "seller_id": str(product.seller_id),
+        "category_id": str(product.category_id),
+        "title": product.title,
+        "slug": product.slug if product.slug is not None else str(product.id),
+        "description": product.description,
+        "status": product.status.value,
+        "deleted": product.deleted,
+        "blocked": product.status in {ProductStatus.BLOCKED, ProductStatus.HARD_BLOCKED},
+        "blocking_reason": _serialize_blocking_reason(product),
+        "field_reports": list(product.field_reports or []),
+        "images": _normalize_images(product.images),
+        "characteristics": _normalize_characteristics(product.characteristics),
+        "skus": [_serialize_sku_seller(sku) for sku in product.skus],
+        "created_at": product.created_at.isoformat(),
+        "updated_at": product.updated_at.isoformat(),
+    }
+
+
 def _serialize_product_public(product: Product) -> dict[str, object]:
     # Storefront projection (X-Service-Key): no cost_price / reserved_quantity, no
     # blocking metadata.
@@ -527,7 +563,7 @@ async def get_product(
         product = await service.get_product_for_seller(parsed, seller_id)
     except ProductNotFoundError:
         return JSONResponse(status_code=404, content=detail_not_found())
-    return JSONResponse(content=_serialize_product_seller(product))
+    return JSONResponse(content=_serialize_product_detail(product))
 
 
 def detail_not_found() -> dict[str, str]:

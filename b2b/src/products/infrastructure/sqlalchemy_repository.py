@@ -205,6 +205,7 @@ class SqlAlchemyProductsRepository:
             # Approval clears all blocking data and makes the card catalog-visible.
             product.status = ProductStatus.MODERATED
             product.blocking_reason_id = None
+            product.blocking_reason_title = None
             product.moderator_comment = None
             product.field_reports = []
             return
@@ -214,6 +215,7 @@ class SqlAlchemyProductsRepository:
             ProductStatus.HARD_BLOCKED if decision.hard_block else ProductStatus.BLOCKED
         )
         product.blocking_reason_id = decision.blocking_reason_id
+        product.blocking_reason_title = decision.blocking_reason_title
         product.moderator_comment = decision.moderator_comment
         product.field_reports = [
             {
