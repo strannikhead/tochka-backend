@@ -8,7 +8,11 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from b2b.src.models import SKU, OutboxEvent, OutboxStatus, Product, ProductStatus
-from b2b.src.skus.domain.errors import ProductHardBlockedError, ProductNotFoundError
+from b2b.src.skus.domain.errors import (
+    ProductAccessDeniedError,
+    ProductHardBlockedError,
+    ProductNotFoundError,
+)
 from b2b.src.skus.infrastructure.moderation_client import ModerationClient
 
 logger = logging.getLogger(__name__)
@@ -35,6 +39,8 @@ class SkuService:
         product = await self._session.get(Product, product_id)
         if product is None:
             raise ProductNotFoundError(f"Product {product_id} not found")
+        if product.seller_id != seller_id:
+            raise ProductAccessDeniedError(f"Product {product_id} belongs to another seller")
         if product.status == ProductStatus.HARD_BLOCKED:
             raise ProductHardBlockedError(f"Product {product_id} is hard blocked")
 

@@ -5,14 +5,18 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from b2b.src.auth import get_current_seller_id
 from b2b.src.config import get_settings
 from b2b.src.db import get_session
 from b2b.src.skus.application.service import SkuService
-from b2b.src.skus.domain.errors import ProductHardBlockedError, ProductNotFoundError
+from b2b.src.skus.domain.errors import (
+    ProductAccessDeniedError,
+    ProductHardBlockedError,
+    ProductNotFoundError,
+)
 from b2b.src.skus.infrastructure.moderation_client import ModerationClient
 
 router = APIRouter(prefix="/api/v1/skus", tags=["skus"])
@@ -31,19 +35,12 @@ class CharacteristicCreate(BaseModel):
 class SKUCreateRequest(BaseModel):
     product_id: UUID
     name: str = Field(min_length=1, max_length=255)
-    price: int = Field(gt=0)
+    price: int = Field(ge=0)
     discount: int = Field(default=0, ge=0)
     cost_price: int | None = Field(default=None, gt=0)
     article: str | None = None
     images: list[SKUImageCreate] = Field(default_factory=list)
     characteristics: list[CharacteristicCreate] = Field(default_factory=list)
-
-    @field_validator("images")
-    @classmethod
-    def images_not_empty(cls, v: list[SKUImageCreate]) -> list[SKUImageCreate]:
-        if not v:
-            raise ValueError("At least one image is required")
-        return v
 
 
 def _get_sku_service(session: Annotated[AsyncSession, Depends(get_session)]) -> SkuService:
@@ -102,15 +99,10 @@ async def create_sku(
             images=[{"url": img.url, "ordering": img.ordering} for img in body.images],
             characteristics=[{"name": c.name, "value": c.value} for c in body.characteristics],
         )
-    except ProductNotFoundError:
-        return JSONResponse(
-            status_code=404,
-            content={"code": "NOT_FOUND", "message": "Товар не найден"},
-        )
-    except ProductHardBlockedError:
+    except (ProductNotFoundError, ProductAccessDeniedError, ProductHardBlockedError):
         return JSONResponse(
             status_code=403,
-            content={"code": "FORBIDDEN", "message": "Товар заблокирован"},
+            content={"code": "FORBIDDEN", "message": "Нет доступа к товару"},
         )
     return JSONResponse(status_code=201, content=_serialize_sku(sku))
 
