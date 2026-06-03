@@ -23,12 +23,13 @@ from b2b.src.main import app
 from b2b.src.models import SKU, Category, Product, ProductStatus
 from b2b.src.skus.infrastructure.moderation_client import ModerationClient
 
-TEST_DB_URL = "postgresql+psycopg://neomarket:neomarket_dev_2026@127.0.0.1:5433/neomarket_b2b"
+TEST_DB_URL = "postgresql+psycopg://neomarket:neomarket_dev_2026@127.0.0.1:5432/neomarket_b2b"
 
 _engine = create_async_engine(TEST_DB_URL, echo=False)
 _SessionLocal = async_sessionmaker(_engine, expire_on_commit=False)
 
 SELLER_ID = uuid.UUID("550e8400-e29b-41d4-a716-446655440000")
+OTHER_SELLER_ID = uuid.UUID("660e8400-e29b-41d4-a716-446655440000")
 
 
 # ---------------------------------------------------------------------------
@@ -49,10 +50,14 @@ async def _make_category() -> uuid.UUID:
         return cat.id
 
 
-async def _make_product(status: ProductStatus, category_id: uuid.UUID) -> uuid.UUID:
+async def _make_product(
+    status: ProductStatus,
+    category_id: uuid.UUID,
+    seller_id: uuid.UUID = SELLER_ID,
+) -> uuid.UUID:
     async with _SessionLocal() as session:
         product = Product(
-            seller_id=SELLER_ID,
+            seller_id=seller_id,
             title="Test Product",
             category_id=category_id,
             status=status,
@@ -194,14 +199,31 @@ def test_add_sku_to_hard_blocked_product_returns_403(
         asyncio.run(_cleanup(product_id))
 
 
-def test_missing_image_returns_422(client: TestClient, category_id: uuid.UUID) -> None:
+def test_empty_images_is_allowed(client: TestClient, category_id: uuid.UUID) -> None:
     product_id = asyncio.run(_make_product(ProductStatus.CREATED, category_id))
     try:
         body = _valid_body(product_id)
         body["images"] = []
 
-        response = client.post("/api/v1/skus", json=body)
+        with patch.object(ModerationClient, "send_created_event", new_callable=AsyncMock):
+            response = client.post("/api/v1/skus", json=body)
 
-        assert response.status_code == 422
+        assert response.status_code == 201
+        assert response.json()["images"] == []
+    finally:
+        asyncio.run(_cleanup(product_id))
+
+
+def test_add_sku_to_another_sellers_product_returns_403(
+    client: TestClient, category_id: uuid.UUID
+) -> None:
+    product_id = asyncio.run(
+        _make_product(ProductStatus.CREATED, category_id, seller_id=OTHER_SELLER_ID)
+    )
+    try:
+        response = client.post("/api/v1/skus", json=_valid_body(product_id))
+
+        assert response.status_code == 403
+        assert response.json()["code"] == "FORBIDDEN"
     finally:
         asyncio.run(_cleanup(product_id))

@@ -4,3 +4,7 @@ class ProductNotFoundError(RuntimeError):
 
 class ProductHardBlockedError(RuntimeError):
     pass
+
+
+class ProductAccessDeniedError(RuntimeError):
+    pass
