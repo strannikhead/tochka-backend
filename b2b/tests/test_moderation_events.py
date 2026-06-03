@@ -207,6 +207,7 @@ def test_blocked_soft_saves_field_reports(client: TestClient, db_state: DbState)
             "BLOCKED",
             hard_block=False,
             blocking_reason_id=str(REASON_ID),
+            blocking_reason_title="Prohibited item",
             moderator_comment="Fix the title",
             field_reports=reports,
         ),
@@ -218,6 +219,8 @@ def test_blocked_soft_saves_field_reports(client: TestClient, db_state: DbState)
     assert product is not None
     assert product.status == ProductStatus.BLOCKED
     assert product.field_reports == reports
+    # Canon: title from the BLOCKED event is stored for the seller card's blocking_reason.
+    assert product.blocking_reason_title == "Prohibited item"
     # Cascade to B2C because the product has active stock.
     cascades = asyncio.run(_fetch_outbox(db_state.session_factory, "PRODUCT_BLOCKED"))
     assert len(cascades) == 1

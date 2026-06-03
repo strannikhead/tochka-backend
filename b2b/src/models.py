@@ -89,6 +89,9 @@ class Product(Base):
     characteristics: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     # Set by Moderation Service when status becomes BLOCKED; exposed in the seller card.
     blocking_reason_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # Human-readable reason name from Moderation's reference dictionary (canon: comes
+    # with the BLOCKED event). Null until Moderation sends it.
+    blocking_reason_title: Mapped[str | None] = mapped_column(Text, nullable=True)
     moderator_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Soft delete: kept as a separate flag so `status` stays a valid moderation state
     # (per OpenAPI ProductStatus, which has no DELETED value). Data is never removed.

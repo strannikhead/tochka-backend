@@ -45,6 +45,7 @@ class ModerationDecision:
     event_type: str  # MODERATED | BLOCKED
     hard_block: bool = False
     blocking_reason_id: UUID | None = None
+    blocking_reason_title: str | None = None
     moderator_comment: str | None = None
     field_reports: tuple[FieldReportInput, ...] = field(default_factory=tuple)
     sender_service: str = "moderation"

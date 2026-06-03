@@ -42,6 +42,9 @@ class ModerationEventRequest(BaseModel):
     moderator_id: UUID | None = None
     moderator_comment: str | None = None
     blocking_reason_id: UUID | None = None
+    # Human-readable reason name (canon: Moderation sends it with the BLOCKED event).
+    # Optional — the flat OpenAPI event does not declare it yet, so absence is tolerated.
+    blocking_reason_title: str | None = None
     hard_block: bool = False
     field_reports: list[FieldReportPayload] | None = None
     occurred_at: datetime
@@ -87,6 +90,7 @@ async def receive_moderation_event(
         event_type=body.event_type,
         hard_block=body.hard_block,
         blocking_reason_id=body.blocking_reason_id,
+        blocking_reason_title=body.blocking_reason_title,
         moderator_comment=body.moderator_comment,
         field_reports=tuple(
             FieldReportInput(field_name=fr.field_name, comment=fr.comment, sku_id=fr.sku_id)
