@@ -377,3 +377,50 @@ def test_expired_idempotency_key_can_be_reused(client: TestClient, db_state: DbS
     assert ticket is not None
     assert ticket.status == TicketStatus.PENDING.value
     assert asyncio.run(_count_processed(db_state.session_factory)) == 1
+
+
+def test_edited_event_on_hard_blocked_is_ignored(client: TestClient, db_state: DbState) -> None:
+    # US-MOD-05: HARD_BLOCKED is terminal — a seller EDITED event is an idempotent no-op,
+    # the ticket is NOT re-queued and its field reports are kept.
+    product_id = uuid4()
+    asyncio.run(
+        _insert_ticket(
+            db_state.session_factory,
+            product_id=product_id,
+            status=TicketStatus.HARD_BLOCKED,
+            with_report=True,
+        )
+    )
+
+    response = client.post(
+        "/api/v1/b2b/events",
+        json=_event("PRODUCT_EDITED", _edited_payload(product_id)),
+        headers=SERVICE_HEADERS,
+    )
+
+    assert response.status_code == 202
+    ticket = asyncio.run(_fetch_ticket(db_state.session_factory, product_id))
+    assert ticket is not None
+    assert ticket.status == TicketStatus.HARD_BLOCKED.value
+    assert asyncio.run(_count_field_reports(db_state.session_factory)) == 1
+
+
+def test_deleted_event_removes_hard_blocked(client: TestClient, db_state: DbState) -> None:
+    # DELETED removes the moderation record even when HARD_BLOCKED (product stays blocked in B2B).
+    product_id = uuid4()
+    asyncio.run(
+        _insert_ticket(
+            db_state.session_factory,
+            product_id=product_id,
+            status=TicketStatus.HARD_BLOCKED,
+        )
+    )
+
+    response = client.post(
+        "/api/v1/b2b/events",
+        json=_event("PRODUCT_DELETED", {"product_id": str(product_id)}),
+        headers=SERVICE_HEADERS,
+    )
+
+    assert response.status_code == 202
+    assert asyncio.run(_fetch_ticket(db_state.session_factory, product_id)) is None

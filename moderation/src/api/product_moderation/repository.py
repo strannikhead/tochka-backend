@@ -15,6 +15,7 @@ from api.product_moderation.domain import (
     ModerationCard,
     TicketNotAssignedError,
     TicketNotFoundError,
+    TicketTerminalError,
     TicketWithoutSkuError,
     TicketWrongStatusError,
     UnknownBlockingReasonError,
@@ -40,9 +41,11 @@ def _check_and_approve(
 ) -> ModerationCard:
     """Pure precondition checks + transition, shared by both implementations.
 
-    Order: status, assignment, SKU. Status is checked before assignment so an
-    edited/re-queued ticket yields the status conflict regardless of its holder.
+    Order: terminal, status, assignment, SKU. HARD_BLOCKED is terminal — any mutation
+    is rejected (403) before the generic status conflict.
     """
+    if card.status == "HARD_BLOCKED":
+        raise TicketTerminalError
     if card.status != "IN_REVIEW":
         raise TicketWrongStatusError
     if card.moderator_id != moderator_id:
@@ -151,7 +154,9 @@ class BlockRepositoryProtocol(Protocol):
 
 
 def _check_ticket_for_block(card: ModerationCard, moderator_id: UUID) -> None:
-    # Status before assignment — same ordering as approve.
+    # Terminal first, then status, then assignment — same ordering as approve.
+    if card.status == "HARD_BLOCKED":
+        raise TicketTerminalError
     if card.status != "IN_REVIEW":
         raise TicketWrongStatusError
     if card.moderator_id != moderator_id:
