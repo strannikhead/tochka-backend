@@ -9,7 +9,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from auth import get_current_moderator_id
-from config import Settings, get_settings
+from config import ApplicationSettings, get_settings
 from database import AsyncSession, get_session
 from modqueue.domain import Ticket
 from modqueue.repository import DbQueueRepository, QueueRepositoryProtocol
@@ -66,7 +66,7 @@ def _ticket_to_response(ticket: Ticket) -> TicketResponse:
 
 def get_queue_repo(
     session: Annotated[AsyncSession, Depends(get_session)],
-    cfg: Annotated[Settings, Depends(get_settings)],
+    cfg: Annotated[ApplicationSettings, Depends(get_settings)],
 ) -> QueueRepositoryProtocol:
     return DbQueueRepository(session, cfg.review_timeout_minutes)
 
@@ -78,7 +78,7 @@ def get_queue_repo(
 async def claim_next_ticket(
     moderator_id: Annotated[UUID, Depends(get_current_moderator_id)],
     repo: Annotated[QueueRepositoryProtocol, Depends(get_queue_repo)],
-    cfg: Annotated[Settings, Depends(get_settings)],
+    cfg: Annotated[ApplicationSettings, Depends(get_settings)],
     body: ClaimRequest | None = None,
 ) -> TicketResponse | Response:
     """Atomically take the next PENDING ticket from the queue.

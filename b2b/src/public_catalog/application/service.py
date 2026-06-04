@@ -54,9 +54,7 @@ class PublicCatalogService:
             stmt = stmt.having(min_price_agg <= max_price)
 
         total: int = (
-            await self.session.execute(
-                select(func.count()).select_from(stmt.subquery())
-            )
+            await self.session.execute(select(func.count()).select_from(stmt.subquery()))
         ).scalar_one()
 
         if sort == "price_asc":
@@ -67,9 +65,7 @@ class PublicCatalogService:
             order_col = Product.created_at.desc()
 
         rows = (
-            await self.session.execute(
-                stmt.order_by(order_col).limit(limit).offset(offset)
-            )
+            await self.session.execute(stmt.order_by(order_col).limit(limit).offset(offset))
         ).all()
 
         return [(row[0], int(row[1] or 0)) for row in rows], total

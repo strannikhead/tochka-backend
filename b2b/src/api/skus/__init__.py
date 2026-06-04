@@ -99,7 +99,7 @@ async def create_sku(
             images=[{"url": img.url, "ordering": img.ordering} for img in body.images],
             characteristics=[{"name": c.name, "value": c.value} for c in body.characteristics],
         )
-    except (ProductNotFoundError, ProductAccessDeniedError, ProductHardBlockedError):
+    except ProductNotFoundError, ProductAccessDeniedError, ProductHardBlockedError:
         return JSONResponse(
             status_code=403,
             content={"code": "FORBIDDEN", "message": "Нет доступа к товару"},

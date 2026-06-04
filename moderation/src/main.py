@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from api import blocking_reasons, product_moderation
+from api import b2b_events, blocking_reasons, product_moderation
 from errors import error_response
 from modqueue.domain import ModeratorAlreadyInReviewError
 from modqueue.router import router as queue_router
@@ -21,10 +21,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-app.include_router(product_moderation.router)
-app.include_router(blocking_reasons.router)
-app.include_router(queue_router)
 
 _STATUS_ERROR_CODES = {
     400: "INVALID_REQUEST",
@@ -81,3 +77,9 @@ async def moderator_already_in_review_handler(
     return error_response(
         409, "MODERATOR_ALREADY_IN_REVIEW", "You already have an active ticket in review."
     )
+
+
+app.include_router(product_moderation.router)
+app.include_router(blocking_reasons.router)
+app.include_router(queue_router)
+app.include_router(b2b_events.router)
