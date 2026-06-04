@@ -22,6 +22,28 @@ class TicketWithoutSkuError(Exception):
     """Raised when the product has no SKU and cannot be approved. -> 409"""
 
 
+class UnknownBlockingReasonError(Exception):
+    """Raised when a blocking_reason_id is absent or inactive in the dictionary. -> 400"""
+
+
+@dataclass(frozen=True)
+class FieldReportInput:
+    field_path: str
+    message: str
+    severity: str  # INFO | WARNING | ERROR
+
+
+@dataclass(frozen=True)
+class BlockResult:
+    """Outcome of a block decision — carries what the B2B event needs."""
+
+    card: ModerationCard
+    hard_block: bool
+    blocking_reason_id: UUID
+    blocking_reason_title: str
+    field_reports: tuple[FieldReportInput, ...]
+
+
 @dataclass(frozen=True)
 class ModerationCard:
     """In-memory view of a product_moderation row, carrying the full ticket shape."""

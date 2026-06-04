@@ -11,19 +11,25 @@ from api.product_moderation.b2b_client import (
     HttpB2BEventClient,
 )
 from api.product_moderation.domain import (
+    FieldReportInput,
     ModerationCard,
     TicketNotAssignedError,
     TicketNotFoundError,
     TicketWithoutSkuError,
     TicketWrongStatusError,
+    UnknownBlockingReasonError,
 )
 from api.product_moderation.repository import (
     ApproveRepositoryProtocol,
+    BlockRepositoryProtocol,
     DbApproveRepository,
+    DbBlockRepository,
 )
 from auth import get_current_moderator_id
 from database import AsyncSession, get_session
 from modqueue.router import TicketResponse
+
+_VALID_SEVERITIES = {"INFO", "WARNING", "ERROR"}
 
 router = APIRouter(prefix="/api/v1", tags=["product-moderation"])
 
@@ -66,6 +72,12 @@ def get_b2b_event_client() -> B2BEventClientProtocol:
     return HttpB2BEventClient()
 
 
+def get_block_repo(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> BlockRepositoryProtocol:
+    return DbBlockRepository(session)
+
+
 # ---- Stubs (other user stories) ----
 
 
@@ -74,9 +86,95 @@ async def get_next_for_moderation() -> dict[str, str]:
     return {"endpoint": "get_next_for_moderation"}
 
 
-@router.post("/products/{id}/decline")
-async def decline_product(id: str) -> dict[str, str]:
-    return {"endpoint": "decline_product"}
+# ---- Block (US-MOD-04 soft / US-MOD-05 hard) ----
+
+
+class FieldReportPayload(BaseModel):
+    # Per moderation/openapi.yaml FieldReport: field_path (JSONPath-like) + message + severity.
+    field_path: str = Field(min_length=1)
+    message: str = Field(max_length=1000)
+    severity: str = "ERROR"
+
+
+class BlockDecisionRequest(BaseModel):
+    blocking_reason_ids: list[UUID] = Field(min_length=1)
+    comment: str | None = Field(default=None, max_length=2000)
+    field_reports: list[FieldReportPayload] = Field(default_factory=list)
+
+
+@router.post("/tickets/{ticket_id}/block", response_model=None)
+async def block_ticket(
+    ticket_id: UUID,
+    body: BlockDecisionRequest,
+    moderator_id: Annotated[UUID, Depends(get_current_moderator_id)],
+    repo: Annotated[BlockRepositoryProtocol, Depends(get_block_repo)],
+    events: Annotated[B2BEventClientProtocol, Depends(get_b2b_event_client)],
+) -> TicketResponse:
+    """Block a ticket: IN_REVIEW -> BLOCKED (soft) or HARD_BLOCKED (hard).
+
+    Block type is routed by the chosen reasons' hard_block flag (any hard → hard).
+    Saves per-field reports, then emits a BLOCKED event (with hard_block) to B2B.
+    """
+    # severity is the only enum the spec constrains on a field report → validate to 400.
+    for report in body.field_reports:
+        if report.severity not in _VALID_SEVERITIES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "INVALID_REQUEST",
+                    "message": f"Invalid severity '{report.severity}'",
+                },
+            )
+    field_reports = [
+        FieldReportInput(field_path=r.field_path, message=r.message, severity=r.severity)
+        for r in body.field_reports
+    ]
+
+    try:
+        result = await repo.block(
+            ticket_id,
+            moderator_id,
+            reason_ids=body.blocking_reason_ids,
+            comment=body.comment,
+            field_reports=field_reports,
+        )
+    except TicketNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "NOT_FOUND", "message": "Ticket not found"},
+        ) from exc
+    except TicketWrongStatusError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "TICKET_WRONG_STATUS", "message": "Ticket is not in review status"},
+        ) from exc
+    except TicketNotAssignedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "TICKET_NOT_ASSIGNED",
+                "message": "Ticket is assigned to another moderator",
+            },
+        ) from exc
+    except UnknownBlockingReasonError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "INVALID_REQUEST", "message": "Unknown or inactive blocking reason"},
+        ) from exc
+
+    await events.emit_blocked(
+        product_id=result.card.product_id,
+        hard_block=result.hard_block,
+        blocking_reason_id=result.blocking_reason_id,
+        blocking_reason_title=result.blocking_reason_title,
+        moderator_comment=result.card.moderator_comment,
+        # Map moderation field_reports → B2B shape (field_path → field_name, message → comment).
+        field_reports=[
+            {"field_name": fr.field_path, "comment": fr.message, "sku_id": None}
+            for fr in result.field_reports
+        ],
+    )
+    return _card_to_response(result.card)
 
 
 # ---- Approve (US-MOD-03) ----
