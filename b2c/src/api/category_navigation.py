@@ -602,8 +602,8 @@ def _upstream_error(exc: UpstreamServiceError) -> JSONResponse:
     return error_response(status_code, "UPSTREAM_UNAVAILABLE", str(exc))
 
 
-def _navigation_error(status_code: int, error: str, message: str) -> JSONResponse:
-    return JSONResponse(status_code=status_code, content={"error": error, "message": message})
+def _navigation_error(status_code: int, code: str, message: str) -> JSONResponse:
+    return error_response(status_code, code, message)
 
 
 def _parse_datetime(value: Any) -> datetime:

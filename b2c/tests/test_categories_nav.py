@@ -162,7 +162,7 @@ def test_ambiguous_params_returns_400(client: TestClient) -> None:
 
     assert response.status_code == 400
     payload = response.json()
-    assert payload["error"] == "ambiguous_param"
+    assert payload["code"] == "ambiguous_param"
     assert payload["message"] == "only one of category_id or product_id must be provided"
 
 
@@ -173,7 +173,7 @@ def test_missing_params_returns_400(client: TestClient) -> None:
 
     assert response.status_code == 400
     payload = response.json()
-    assert payload["error"] == "missing_param"
+    assert payload["code"] == "missing_param"
     assert payload["message"] == "category_id or product_id must be provided"
 
 
@@ -195,7 +195,7 @@ def test_orphan_node_returns_422(client: TestClient) -> None:
 
     assert response.status_code == 422
     payload = response.json()
-    assert payload["error"] == "orphan_node"
+    assert payload["code"] == "orphan_node"
     assert payload["message"] == "category hierarchy is broken"
 
 
@@ -206,5 +206,5 @@ def test_orphan_node_returns_422_for_tree(client: TestClient) -> None:
 
     assert response.status_code == 422
     payload = response.json()
-    assert payload["error"] == "orphan_node"
+    assert payload["code"] == "orphan_node"
     assert payload["message"] == "category hierarchy is broken"
