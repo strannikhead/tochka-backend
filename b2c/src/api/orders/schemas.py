@@ -102,7 +102,6 @@ class CheckoutOrderResponse(BaseModel):
     address: OrderAddressResponse
     comment: str | None = None
     created_at: str
-    updated_at: str
 
     @classmethod
     def from_domain(cls, order: OrderSnapshot, address: Address) -> CheckoutOrderResponse:
@@ -116,7 +115,6 @@ class CheckoutOrderResponse(BaseModel):
             address=OrderAddressResponse.from_model(address),
             comment=None,
             created_at=order.created_at.isoformat().replace("+00:00", "Z"),
-            updated_at=order.updated_at.isoformat().replace("+00:00", "Z"),
         )
 
 
