@@ -43,7 +43,7 @@ async def retry_pending_cancellations_once(
             )
         except UpstreamServiceError:
             logger.exception("Retry unreserve failed for order %s", order.id)
-            raise
+            continue
 
         updated_order = await repository.update_status(
             order_id=order.id,
