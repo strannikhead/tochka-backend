@@ -4,11 +4,12 @@ from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from b2b.src.auth import get_current_seller_id
+from b2b.src.b2c_client import B2cClient
 from b2b.src.config import get_settings
 from b2b.src.db import get_session
 from b2b.src.skus.application.service import SkuService
@@ -16,6 +17,8 @@ from b2b.src.skus.domain.errors import (
     ProductAccessDeniedError,
     ProductHardBlockedError,
     ProductNotFoundError,
+    SkuHasActiveReservesError,
+    SkuNotFoundError,
 )
 from b2b.src.skus.infrastructure.moderation_client import ModerationClient
 
@@ -45,11 +48,15 @@ class SKUCreateRequest(BaseModel):
 
 def _get_sku_service(session: Annotated[AsyncSession, Depends(get_session)]) -> SkuService:
     settings = get_settings()
-    client = ModerationClient(
+    moderation_client = ModerationClient(
         base_url=settings.moderation.url,
         service_key=settings.moderation.service_key,
     )
-    return SkuService(session, client)
+    b2c_client = B2cClient(
+        base_url=settings.b2c.url,
+        service_key=settings.b2c.service_key,
+    )
+    return SkuService(session, moderation_client, b2c_client)
 
 
 def _serialize_sku(sku) -> dict:
@@ -99,7 +106,7 @@ async def create_sku(
             images=[{"url": img.url, "ordering": img.ordering} for img in body.images],
             characteristics=[{"name": c.name, "value": c.value} for c in body.characteristics],
         )
-    except ProductNotFoundError, ProductAccessDeniedError, ProductHardBlockedError:
+    except (ProductNotFoundError, ProductAccessDeniedError, ProductHardBlockedError):
         return JSONResponse(
             status_code=403,
             content={"code": "FORBIDDEN", "message": "Нет доступа к товару"},
@@ -117,9 +124,35 @@ async def update_sku(sku_id: str) -> dict[str, str]:
     return {"endpoint": "update_sku"}
 
 
-@router.delete("/{sku_id}")
-async def delete_sku(sku_id: str) -> dict[str, str]:
-    return {"endpoint": "delete_sku"}
+@router.delete("/{sku_id}", status_code=204)
+async def delete_sku(
+    sku_id: UUID,
+    seller_id: Annotated[UUID, Depends(get_current_seller_id)],
+    service: Annotated[SkuService, Depends(_get_sku_service)],
+) -> Response:
+    try:
+        await service.delete_sku(sku_id=sku_id, seller_id=seller_id)
+    except SkuNotFoundError:
+        return JSONResponse(
+            status_code=404,
+            content={"code": "NOT_FOUND", "message": "SKU not found"},
+        )
+    except ProductAccessDeniedError:
+        return JSONResponse(
+            status_code=403,
+            content={"code": "NOT_OWNER", "message": "SKU does not belong to the authenticated seller"},  # noqa: E501
+        )
+    except ProductHardBlockedError:
+        return JSONResponse(
+            status_code=403,
+            content={"code": "FORBIDDEN", "message": "Cannot delete SKU of hard-blocked product"},
+        )
+    except SkuHasActiveReservesError:
+        return JSONResponse(
+            status_code=409,
+            content={"code": "CONFLICT", "message": "Cannot delete SKU with active reserves"},
+        )
+    return Response(status_code=204)
 
 
 @router.post("/images")

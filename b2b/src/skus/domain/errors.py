@@ -8,3 +8,11 @@ class ProductHardBlockedError(RuntimeError):
 
 class ProductAccessDeniedError(RuntimeError):
     pass
+
+
+class SkuNotFoundError(RuntimeError):
+    pass
+
+
+class SkuHasActiveReservesError(RuntimeError):
+    pass
