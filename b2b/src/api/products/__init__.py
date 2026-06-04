@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from b2b.src.auth import get_current_seller_id, get_optional_seller_id
@@ -299,8 +299,7 @@ async def list_product_skus(product_id: str) -> dict[str, str]:
 
 @router.get("")
 async def list_products(
-    request: Request,
-    service: Annotated[ProductsService, Depends(get_products_service)],
+    seller_id: Annotated[UUID, Depends(get_current_seller_id)],
     session: Annotated[AsyncSession, Depends(get_session)],
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
@@ -310,6 +309,7 @@ async def list_products(
     ids: str | None = Query(default=None),
 ) -> JSONResponse:
     if ids:
+        # B2C checkout path: fetch product+SKU data by SKU IDs.
         parsed_ids: list[UUID] = []
         for item in (part.strip() for part in ids.split(",") if part.strip()):
             try:
@@ -354,32 +354,62 @@ async def list_products(
             }
         )
 
-    # Keep compatibility: parse filters and optional category_id from query
-    category_uuid = None
-    # allow optional category_id in query (not part of canonical seller list, but harmless)
-    category_id = request.query_params.get("category_id")
-    if category_id is not None:
+    # Seller cabinet: seller_id comes from JWT only — never from query params (IDOR guard).
+    status_filter: ProductStatus | None = None
+    if status is not None:
         try:
-            category_uuid = UUID(category_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail="Некорректный id категории") from exc
+            status_filter = ProductStatus(status)
+        except ValueError:
+            return JSONResponse(
+                status_code=400,
+                content={"code": "VALIDATION_ERROR", "message": f"Некорректный статус: {status}"},
+            )
 
-    filters = _parse_filters(request)
-    search_value = search.strip() if search is not None else None
+    min_price_col = func.min(SKU.price).label("min_price")
+    stmt = (
+        select(Product, min_price_col)
+        .outerjoin(SKU, SKU.product_id == Product.id)
+        .where(Product.seller_id == seller_id)
+        .group_by(Product.id)
+    )
+    if not include_deleted:
+        stmt = stmt.where(Product.deleted.is_(False))
+    if status_filter is not None:
+        stmt = stmt.where(Product.status == status_filter)
+    if search is not None:
+        stmt = stmt.where(Product.title.ilike(f"%{search.strip()}%"))
 
-    try:
-        product_list = await service.list_products(
-            category_id=category_uuid,
-            filters=filters,
-            sort=None,
-            limit=limit,
-            offset=offset,
-            search=search_value,
-        )
-    except CategoryNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    count_subq = stmt.subquery()
+    total_count = (
+        await session.execute(select(func.count()).select_from(count_subq))
+    ).scalar_one()
 
-    return JSONResponse(content=_to_response(product_list))
+    stmt = stmt.order_by(Product.created_at.desc()).limit(limit).offset(offset)
+    rows = (await session.execute(stmt)).all()
+
+    items = [
+        {
+            "id": str(p.id),
+            "title": p.title,
+            "slug": p.slug if p.slug is not None else str(p.id),
+            "status": p.status.value,
+            "category_id": str(p.category_id),
+            "deleted": p.deleted,
+            "created_at": p.created_at.isoformat(),
+            "min_price": min_price,
+            "cover_image": _extract_cover_image(p.images),
+        }
+        for p, min_price in rows
+    ]
+
+    return JSONResponse(
+        content={
+            "items": items,
+            "total_count": total_count,
+            "limit": limit,
+            "offset": offset,
+        }
+    )
 
 
 def _product_to_checkout_payload(product: Product) -> dict[str, object]:
