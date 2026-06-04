@@ -148,12 +148,8 @@ def test_catalog_returns_moderated_in_stock_products(
         asyncio.run(_cleanup(visible_id, created_id, deleted_id, no_stock_id))
 
 
-def test_catalog_excludes_hard_blocked(
-    client: TestClient, category_id: uuid.UUID
-) -> None:
-    hard_blocked_id = asyncio.run(
-        _make_product(category_id, status=ProductStatus.HARD_BLOCKED)
-    )
+def test_catalog_excludes_hard_blocked(client: TestClient, category_id: uuid.UUID) -> None:
+    hard_blocked_id = asyncio.run(_make_product(category_id, status=ProductStatus.HARD_BLOCKED))
     asyncio.run(_make_sku(hard_blocked_id, active_quantity=5))
 
     try:
@@ -176,9 +172,7 @@ def test_catalog_missing_service_key_returns_401(client: TestClient) -> None:
     assert body.get("code") == "UNAUTHORIZED"
 
 
-def test_catalog_response_has_no_cost_price(
-    client: TestClient, category_id: uuid.UUID
-) -> None:
+def test_catalog_response_has_no_cost_price(client: TestClient, category_id: uuid.UUID) -> None:
     product_id = asyncio.run(_make_product(category_id))
     asyncio.run(_make_sku(product_id, active_quantity=5, cost_price=9999))
 
@@ -198,9 +192,7 @@ def test_catalog_response_has_no_cost_price(
         asyncio.run(_cleanup(product_id))
 
 
-def test_batch_ids_returns_visible_subset(
-    client: TestClient, category_id: uuid.UUID
-) -> None:
+def test_batch_ids_returns_visible_subset(client: TestClient, category_id: uuid.UUID) -> None:
     visible_id = asyncio.run(_make_product(category_id, status=ProductStatus.MODERATED))
     asyncio.run(_make_sku(visible_id, active_quantity=3))
 

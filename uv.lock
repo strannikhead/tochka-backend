@@ -761,6 +761,7 @@ name = "moderation-service"
 version = "0.0.0"
 source = { virtual = "moderation" }
 dependencies = [
+    { name = "aiosqlite" },
     { name = "alembic" },
     { name = "fastapi" },
     { name = "httpx" },
@@ -776,6 +777,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiosqlite", specifier = ">=0.20" },
     { name = "alembic", specifier = ">=1.13" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
