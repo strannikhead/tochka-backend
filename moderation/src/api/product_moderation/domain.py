@@ -26,6 +26,10 @@ class UnknownBlockingReasonError(Exception):
     """Raised when a blocking_reason_id is absent or inactive in the dictionary. -> 400"""
 
 
+class TicketTerminalError(Exception):
+    """Raised on any mutation of a HARD_BLOCKED (terminal) ticket. -> 403"""
+
+
 @dataclass(frozen=True)
 class FieldReportInput:
     field_path: str

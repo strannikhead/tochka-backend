@@ -15,6 +15,7 @@ from api.product_moderation.domain import (
     ModerationCard,
     TicketNotAssignedError,
     TicketNotFoundError,
+    TicketTerminalError,
     TicketWithoutSkuError,
     TicketWrongStatusError,
     UnknownBlockingReasonError,
@@ -143,6 +144,12 @@ async def block_ticket(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "NOT_FOUND", "message": "Ticket not found"},
         ) from exc
+    except TicketTerminalError as exc:
+        # HARD_BLOCKED is terminal — no mutation is allowed in the normal flow.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "FORBIDDEN", "message": "Ticket is hard-blocked (terminal)"},
+        ) from exc
     except TicketWrongStatusError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -205,6 +212,12 @@ async def approve_ticket(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "NOT_FOUND", "message": "Ticket not found"},
+        ) from exc
+    except TicketTerminalError as exc:
+        # HARD_BLOCKED is terminal — no mutation is allowed in the normal flow.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "FORBIDDEN", "message": "Ticket is hard-blocked (terminal)"},
         ) from exc
     except TicketWrongStatusError as exc:
         raise HTTPException(

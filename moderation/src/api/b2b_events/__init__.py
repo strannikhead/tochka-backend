@@ -173,6 +173,11 @@ async def _handle_edited(session: AsyncSession, payload: EventProductEdited) -> 
         )
         return
 
+    if ticket.status == TicketStatus.HARD_BLOCKED.value:
+        # Terminal: a hard-blocked product is never re-opened by a seller EDITED event.
+        # The event is acknowledged (idempotent no-op), the ticket stays HARD_BLOCKED.
+        return
+
     await _clear_field_reports(session, ticket.id)
     _reset_ticket_for_queue(
         ticket,
