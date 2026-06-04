@@ -86,3 +86,35 @@ class ModerationDecision(Base):
     reason: Mapped[BlockingReason | None] = relationship(
         "BlockingReason", back_populates="decisions"
     )
+
+
+class ProductModeration(Base):
+    """Moderation ticket — one per product."""
+
+    __tablename__ = "product_moderation"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    product_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), unique=True, nullable=False, index=True
+    )
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    category_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    kind: Mapped[str] = mapped_column(String(10), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="PENDING", index=True)
+    queue_priority: Mapped[int] = mapped_column(Integer, nullable=False)
+    json_before: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    json_after: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    blocking_reason_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    moderator_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    moderator_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    claim_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    date_created: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    date_updated: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    date_moderation: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
