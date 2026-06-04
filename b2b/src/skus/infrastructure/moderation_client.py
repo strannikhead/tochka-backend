@@ -14,16 +14,17 @@ class ModerationClient:
         self._base_url = base_url
         self._service_key = service_key
 
-    async def send_created_event(
+    async def _send_product_event(
         self,
         *,
+        event_type: str,
         idempotency_key: UUID,
         product_id: UUID,
         seller_id: UUID,
         date: datetime,
     ) -> None:
         payload = {
-            "type": "CREATED",
+            "type": event_type,
             "idempotency_key": str(idempotency_key),
             "product_id": str(product_id),
             "seller_id": str(seller_id),
@@ -39,9 +40,41 @@ class ModerationClient:
                 )
                 response.raise_for_status()
         except httpx.HTTPError as exc:
-            # Fire-and-forget: log the failure but don't roll back the transaction.
             logger.error(
-                "Failed to send CREATED event to moderation for product %s: %s",
+                "Failed to send %s event to moderation for product %s: %s",
+                event_type,
                 product_id,
                 exc,
             )
+
+    async def send_created_event(
+        self,
+        *,
+        idempotency_key: UUID,
+        product_id: UUID,
+        seller_id: UUID,
+        date: datetime,
+    ) -> None:
+        await self._send_product_event(
+            event_type="CREATED",
+            idempotency_key=idempotency_key,
+            product_id=product_id,
+            seller_id=seller_id,
+            date=date,
+        )
+
+    async def send_deleted_event(
+        self,
+        *,
+        idempotency_key: UUID,
+        product_id: UUID,
+        seller_id: UUID,
+        date: datetime,
+    ) -> None:
+        await self._send_product_event(
+            event_type="DELETED",
+            idempotency_key=idempotency_key,
+            product_id=product_id,
+            seller_id=seller_id,
+            date=date,
+        )
