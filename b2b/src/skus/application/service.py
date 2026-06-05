@@ -57,6 +57,7 @@ class SkuService:
         is_first_sku = product.status == ProductStatus.CREATED and not await self._has_skus(
             product_id
         )
+        needs_remoderation = product.status in {ProductStatus.MODERATED, ProductStatus.BLOCKED}
 
         sku = SKU(
             product_id=product_id,
@@ -80,6 +81,15 @@ class SkuService:
                 event_type="CREATED",
             )
             self._session.add(outbox_event)
+        elif needs_remoderation:
+            product.status = ProductStatus.ON_MODERATION
+            outbox_event = OutboxEvent(
+                idempotency_key=uuid4(),
+                product_id=product_id,
+                seller_id=seller_id,
+                event_type="EDITED",
+            )
+            self._session.add(outbox_event)
 
         # Single commit: SKU + status change + outbox record are atomic.
         await self._session.commit()
@@ -97,6 +107,7 @@ class SkuService:
         """
         _dispatch_map = {
             "CREATED": self._moderation_client.send_created_event,
+            "EDITED": self._moderation_client.send_edited_event,
             "DELETED": self._moderation_client.send_deleted_event,
         }
         send_fn = _dispatch_map.get(event.event_type)
