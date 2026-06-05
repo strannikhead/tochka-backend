@@ -63,6 +63,22 @@ class ModerationClient:
             date=date,
         )
 
+    async def send_edited_event(
+        self,
+        *,
+        idempotency_key: UUID,
+        product_id: UUID,
+        seller_id: UUID,
+        date: datetime,
+    ) -> None:
+        await self._send_product_event(
+            event_type="EDITED",
+            idempotency_key=idempotency_key,
+            product_id=product_id,
+            seller_id=seller_id,
+            date=date,
+        )
+
     async def send_deleted_event(
         self,
         *,

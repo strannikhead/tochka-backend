@@ -166,22 +166,26 @@ def test_first_sku_emits_created_event_to_moderation(
         asyncio.run(_cleanup(product_id))
 
 
-def test_second_sku_no_status_change(client: TestClient, category_id: uuid.UUID) -> None:
+def test_second_sku_from_on_moderation_triggers_no_additional_event(
+    client: TestClient, category_id: uuid.UUID
+) -> None:
     product_id = asyncio.run(_make_product(ProductStatus.CREATED, category_id))
-    asyncio.run(_add_existing_sku(product_id))
-    # After the first SKU is added manually the product is still CREATED in DB
-    # (we bypassed the service), so second call via API should not change status.
     try:
+        with patch.object(ModerationClient, "send_created_event", new_callable=AsyncMock):
+            client.post("/api/v1/skus", json=_valid_body(product_id))
+        assert asyncio.run(_get_product_status(product_id)) == ProductStatus.ON_MODERATION
+
         with patch.object(
             ModerationClient, "send_created_event", new_callable=AsyncMock
-        ) as mock_send:
+        ) as mock_created, patch.object(
+            ModerationClient, "send_edited_event", new_callable=AsyncMock
+        ) as mock_edited:
             response = client.post("/api/v1/skus", json=_valid_body(product_id))
 
         assert response.status_code == 201
-        # Product already had a SKU, so no status transition and no event.
-        status_after = asyncio.run(_get_product_status(product_id))
-        assert status_after == ProductStatus.CREATED
-        mock_send.assert_not_awaited()
+        assert asyncio.run(_get_product_status(product_id)) == ProductStatus.ON_MODERATION
+        mock_created.assert_not_awaited()
+        mock_edited.assert_not_awaited()
     finally:
         asyncio.run(_cleanup(product_id))
 
@@ -210,6 +214,43 @@ def test_empty_images_is_allowed(client: TestClient, category_id: uuid.UUID) -> 
 
         assert response.status_code == 201
         assert response.json()["images"] == []
+    finally:
+        asyncio.run(_cleanup(product_id))
+
+
+def test_sku_on_moderated_product_triggers_remoderation(
+    client: TestClient, category_id: uuid.UUID
+) -> None:
+    product_id = asyncio.run(_make_product(ProductStatus.MODERATED, category_id))
+    try:
+        with patch.object(
+            ModerationClient, "send_edited_event", new_callable=AsyncMock
+        ) as mock_edited:
+            response = client.post("/api/v1/skus", json=_valid_body(product_id))
+
+        assert response.status_code == 201
+        assert asyncio.run(_get_product_status(product_id)) == ProductStatus.ON_MODERATION
+        mock_edited.assert_awaited_once()
+        call_kwargs = mock_edited.call_args.kwargs
+        assert call_kwargs["product_id"] == product_id
+        assert call_kwargs["seller_id"] == SELLER_ID
+    finally:
+        asyncio.run(_cleanup(product_id))
+
+
+def test_sku_on_blocked_product_triggers_remoderation(
+    client: TestClient, category_id: uuid.UUID
+) -> None:
+    product_id = asyncio.run(_make_product(ProductStatus.BLOCKED, category_id))
+    try:
+        with patch.object(
+            ModerationClient, "send_edited_event", new_callable=AsyncMock
+        ) as mock_edited:
+            response = client.post("/api/v1/skus", json=_valid_body(product_id))
+
+        assert response.status_code == 201
+        assert asyncio.run(_get_product_status(product_id)) == ProductStatus.ON_MODERATION
+        mock_edited.assert_awaited_once()
     finally:
         asyncio.run(_cleanup(product_id))
 
