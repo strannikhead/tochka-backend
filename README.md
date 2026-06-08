@@ -292,3 +292,4 @@ uv add --group dev <package>
 ├── pyproject.toml           # uv workspace root + dev-tools
 └── uv.lock
 ```
+ 
