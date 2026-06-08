@@ -275,6 +275,39 @@ def test_edited_updates_in_review(client: TestClient, db_state: DbState) -> None
     assert asyncio.run(_count_field_reports(db_state.session_factory)) == 0
 
 
+def test_edited_ignores_hard_blocked_ticket(client: TestClient, db_state: DbState) -> None:
+    product_id = uuid4()
+    asyncio.run(
+        _insert_ticket(
+            db_state.session_factory,
+            product_id=product_id,
+            status=TicketStatus.HARD_BLOCKED,
+            queue_priority=4,
+            with_report=True,
+        )
+    )
+
+    response = client.post(
+        "/api/v1/b2b/events",
+        json=_event("PRODUCT_EDITED", _edited_payload(product_id, queue_priority=1)),
+        headers=SERVICE_HEADERS,
+    )
+
+    assert response.status_code == 202
+    ticket = asyncio.run(_fetch_ticket(db_state.session_factory, product_id))
+    assert ticket is not None
+    assert ticket.status == TicketStatus.HARD_BLOCKED.value
+    assert ticket.kind == TicketKind.CREATE.value
+    assert ticket.queue_priority == 4
+    assert ticket.moderator_id is None
+    assert ticket.claimed_at is None
+    assert ticket.claim_expires_at is None
+    assert ticket.json_before is None
+    assert ticket.json_after == {"title": "current", "total_active_quantity": 1}
+    assert asyncio.run(_count_field_reports(db_state.session_factory)) == 1
+    assert asyncio.run(_count_processed(db_state.session_factory)) == 1
+
+
 def test_deleted_archived(client: TestClient, db_state: DbState) -> None:
     product_id = uuid4()
     asyncio.run(

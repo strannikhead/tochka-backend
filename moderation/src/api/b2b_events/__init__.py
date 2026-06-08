@@ -144,6 +144,9 @@ async def _handle_created(session: AsyncSession, payload: EventProductCreated) -
         )
         return
 
+    if ticket.status in {TicketStatus.HARD_BLOCKED, TicketStatus.HARD_BLOCKED.value}:
+        return
+
     await _clear_field_reports(session, ticket.id)
     _reset_ticket_for_queue(
         ticket,
